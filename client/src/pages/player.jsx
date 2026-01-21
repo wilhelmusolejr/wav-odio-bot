@@ -7,7 +7,7 @@ const API_URL = "http://192.168.177.251:8080";
 const RDP_NAME = "rdp_1";
 
 export default function Player() {
-  const [playerName, setPlayerName] = useState("botfrag666");
+  const [playerName, setPlayerName] = useState("");
   const [audioList, setAudioList] = useState([]);
   const [audioControls, setAudioControls] = useState({});
   const [connected, setConnected] = useState(false);
@@ -159,13 +159,18 @@ export default function Player() {
       groupName: data.groupName,
       rdpName: data.rdpName,
     });
+
+    // 🔥 TRUST THE SERVER
+    setPlayerName(data.playerName ?? data.clientId);
+
     setError("");
 
-    // Fetch audio files for this player
-    fetchAudiosForPlayer(playerName);
+    fetchAudiosForPlayer(data.playerName);
   };
 
   const fetchAudiosForPlayer = async (name) => {
+    console.log(`📥 Fetching audio files for player: ${name}`);
+
     try {
       const response = await fetch(
         `${API_URL}/api/audios/${encodeURIComponent(name)}`,
@@ -459,15 +464,23 @@ export default function Player() {
                         👤 Your Name
                       </label>
                       <input
+                        list="player-names"
                         type="text"
                         value={playerName}
                         onChange={(e) => {
                           setPlayerName(e.target.value);
                           setError("");
                         }}
-                        placeholder="Enter your name"
+                        placeholder="Enter or select your name"
                         className="w-full px-4 py-2 border border-gray-600 rounded-lg focus:border-gray-400 focus:outline-none bg-gray-800 text-white placeholder-gray-500"
                       />
+
+                      <datalist id="player-names">
+                        <option value="botfrag666" />
+                        <option value="player1" />
+                        <option value="player2" />
+                        <option value="admin" />
+                      </datalist>
                     </div>
 
                     <div>
