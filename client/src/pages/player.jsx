@@ -229,10 +229,19 @@ export default function Player() {
       if (control.isPlaying) {
         console.log("▶️ Master triggered play for group");
         console.log("🎵 Audio list length:", audioList.length);
+        console.log(
+          "🎵 AudioRefs available:",
+          Object.keys(audioRefs.current).length,
+        );
 
-        // Start from first audio
-        if (audioList.length > 0) {
-          const firstAudioId = audioList[0].id;
+        // Use audioList if available, otherwise try to use audioRefs
+        const audioIds =
+          audioList.length > 0
+            ? audioList.map((a) => a.id)
+            : Object.keys(audioRefs.current);
+
+        if (audioIds.length > 0) {
+          const firstAudioId = audioIds[0];
           console.log("🎵 Starting first audio:", firstAudioId);
           setCurrentPlayingId(firstAudioId);
 
