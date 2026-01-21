@@ -52,6 +52,11 @@ export default function Master() {
             seconds: secondsLeft,
             formatted: `${String(hoursLeft).padStart(2, "0")}:${String(minutesLeft).padStart(2, "0")}:${String(secondsLeft).padStart(2, "0")}`,
           };
+
+          // Initialize previous countdown if not set
+          if (previousCountdownsRef.current[group.name] === undefined) {
+            previousCountdownsRef.current[group.name] = secondsUntil;
+          }
         }
       });
 
@@ -75,10 +80,18 @@ export default function Master() {
           const totalSeconds =
             countdown.hours * 3600 + countdown.minutes * 60 + countdown.seconds;
           const previousSeconds =
-            previousCountdownsRef.current[group.name] || -1;
+            previousCountdownsRef.current[group.name] || totalSeconds;
 
-          // Only trigger when countdown transitions from > 0 to <= 0 (countdown naturally reaches zero)
-          if (previousSeconds > 0 && totalSeconds <= 0) {
+          console.log(
+            `⏱️ [${group.name}] Countdown check - Previous: ${previousSeconds}, Current: ${totalSeconds}`,
+          );
+
+          // Trigger when countdown transitions to 0-5 seconds (natural trigger)
+          // OR when seconds go from positive to small number (within 5 seconds of target)
+          if (
+            (previousSeconds > 5 && totalSeconds <= 5 && totalSeconds >= 0) ||
+            (previousSeconds > 0 && totalSeconds === 0)
+          ) {
             // Check if we've already triggered this time
             const triggerKey = `${group.name}-${scheduledTime}`;
             if (!triggeredTimesRef.current.has(triggerKey)) {
@@ -241,27 +254,22 @@ export default function Master() {
     const newState = !groupControls[groupName]?.isPlaying;
     const time = groupControls[groupName]?.time || "08:00";
 
-    console.log(`🔘 Play button clicked for group: ${groupName}`);
-    console.log(`🎚️ Setting isPlaying to: ${newState}`);
-    console.log(`⏰ Time is: ${time}`);
-
     setGroupControls((prev) => ({
       ...prev,
       [groupName]: { ...prev[groupName], isPlaying: newState },
     }));
 
-    // Send to server
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const messagePayload = {
-        type: "UPDATE_GROUP_CONTROL",
-        groupName,
-        control: {
-          isPlaying: newState,
-          time,
-        },
-      };
-      console.log(`📤 Sending to server:`, messagePayload);
-      wsRef.current.send(JSON.stringify(messagePayload));
+      wsRef.current.send(
+        JSON.stringify({
+          type: "UPDATE_GROUP_CONTROL",
+          groupName,
+          control: {
+            isPlaying: newState,
+            time, // ✅ send finalized time here
+          },
+        }),
+      );
     }
   };
 
@@ -306,21 +314,6 @@ export default function Master() {
       ...prev,
       [groupName]: { ...prev[groupName], time: value || "" },
     }));
-
-    // Send to server
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const isPlaying = groupControls[groupName]?.isPlaying || false;
-      wsRef.current.send(
-        JSON.stringify({
-          type: "UPDATE_GROUP_CONTROL",
-          groupName,
-          control: {
-            isPlaying,
-            time: value,
-          },
-        }),
-      );
-    }
   };
 
   const formatTime = (timeString) => {
