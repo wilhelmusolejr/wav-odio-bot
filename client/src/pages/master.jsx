@@ -178,6 +178,18 @@ export default function Master() {
 
           case "UPDATE_GROUPS":
             handleGroupsUpdate(data.groups);
+
+          case "GROUP_PLAYBACK_COMPLETE":
+            handleGroupPlaybackComplete(data.groupName);
+            break;
+
+          case "GROUP_PLAYBACK_STATUS":
+            handleGroupPlaybackStatus(
+              data.groupName,
+              data.finishedCount,
+              data.totalCount,
+            );
+            break;
             break;
 
           case "ERROR":
@@ -211,7 +223,7 @@ export default function Master() {
     };
   }, []);
 
-  const handleInitialGroups = (serverGroups) => {
+  function handleInitialGroups(serverGroups) {
     setGroups(serverGroups);
 
     // Initialize controls state
@@ -230,9 +242,9 @@ export default function Master() {
 
     setGroupControls(groupControlsInit);
     setUserControls(userControlsInit);
-  };
+  }
 
-  const handleGroupsUpdate = (serverGroups) => {
+  function handleGroupsUpdate(serverGroups) {
     setGroups(serverGroups);
 
     // Update user controls with server state
@@ -248,7 +260,39 @@ export default function Master() {
     });
 
     setUserControls(userControlsUpdate);
-  };
+  }
+
+  function handleGroupPlaybackComplete(groupName) {
+    console.log(
+      `✅ [${groupName}] All players finished playing! Auto-pausing...`,
+    );
+
+    // Auto-pause the group
+    setGroupControls((prev) => ({
+      ...prev,
+      [groupName]: { ...prev[groupName], isPlaying: false },
+    }));
+
+    // Send pause command to all players
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "UPDATE_GROUP_CONTROL",
+          groupName,
+          control: {
+            isPlaying: false,
+            time: groupControls[groupName]?.time || "08:00",
+          },
+        }),
+      );
+    }
+  }
+
+  function handleGroupPlaybackStatus(groupName, finishedCount, totalCount) {
+    console.log(
+      `📊 [${groupName}] Playback status: ${finishedCount}/${totalCount} players finished`,
+    );
+  }
 
   const toggleGroupPlayPause = (groupName) => {
     const newState = !groupControls[groupName]?.isPlaying;

@@ -312,6 +312,18 @@ export default function Player() {
       }, pauseDuration);
     } else {
       console.log("✅ Playlist finished - all tracks played");
+
+      // Send message to master that player finished playing
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "PLAYER_FINISHED_PLAYING",
+            playerName: playerName,
+            groupName: RDP_NAME,
+          }),
+        );
+        console.log("📤 Sent PLAYER_FINISHED_PLAYING to master");
+      }
       setCurrentPlayingId(null);
     }
   };
