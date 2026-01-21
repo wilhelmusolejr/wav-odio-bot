@@ -113,6 +113,7 @@ wss.on("connection", (ws) => {
             type: "PLAYER_JOINED",
             clientId,
             groupName,
+            playerName,
             rdpName,
           }),
         );
