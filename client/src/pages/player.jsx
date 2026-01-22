@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import accounts from "../config/account.json";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
-const RDP_NAME = "rdp_1";
 
 export default function Player() {
   const [playerName, setPlayerName] = useState("");
@@ -18,6 +18,7 @@ export default function Player() {
   const wsRef = useRef(null);
   const audioRefs = useRef({});
   const autoPlayTimeoutRef = useRef(null);
+  const [rdpName, setRdpName] = useState("");
 
   // Initialize audio controls
   useEffect(() => {
@@ -64,8 +65,8 @@ export default function Player() {
       JSON.stringify({
         type: "PLAYER_JOIN",
         playerName: playerName.trim(),
-        groupName: RDP_NAME,
-        rdpName: RDP_NAME,
+        groupName: rdpName,
+        rdpName: rdpName,
       }),
     );
   };
@@ -324,7 +325,7 @@ export default function Player() {
           JSON.stringify({
             type: "PLAYER_FINISHED_PLAYING",
             playerName: playerName,
-            groupName: RDP_NAME,
+            groupName: rdpName,
           }),
         );
         console.log("📤 Sent PLAYER_FINISHED_PLAYING to master");
@@ -455,7 +456,7 @@ export default function Player() {
                     Join Group
                   </h2>
                   <p className="text-gray-400 mb-6">
-                    Enter your name to join {RDP_NAME}
+                    Enter your name to join {rdpName}
                   </p>
 
                   <form onSubmit={handleJoinGroup} className="space-y-4">
@@ -476,10 +477,12 @@ export default function Player() {
                       />
 
                       <datalist id="player-names">
-                        <option value="botfrag666" />
-                        <option value="player1" />
-                        <option value="player2" />
-                        <option value="admin" />
+                        {accounts.map((account) => (
+                          <option
+                            key={account.username}
+                            value={account.username}
+                          />
+                        ))}
                       </datalist>
                     </div>
 
@@ -487,9 +490,13 @@ export default function Player() {
                       <label className="block text-sm font-semibold text-gray-300 mb-2">
                         🌐 Group (RDP)
                       </label>
-                      <div className="px-4 py-2 border border-gray-600 rounded-lg bg-gray-800 text-gray-300">
-                        {RDP_NAME}
-                      </div>
+                      <input
+                        type="text"
+                        value={rdpName}
+                        onChange={(e) => setRdpName(e.target.value)}
+                        placeholder="Enter RDP name"
+                        className="w-full px-4 py-2 border border-gray-600 rounded-lg focus:border-gray-400 focus:outline-none bg-gray-800 text-white placeholder-gray-500"
+                      />
                     </div>
 
                     {error && (
@@ -507,7 +514,7 @@ export default function Player() {
                           : "bg-gray-700 text-gray-500 border-gray-600 cursor-not-allowed"
                       }`}
                     >
-                      {connected ? "▶ Join Group" : "Connecting..."}
+                      {connected ? "Join Group" : "Connecting..."}
                     </button>
                   </form>
 
