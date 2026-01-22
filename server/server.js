@@ -7,6 +7,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { createReadStream } from "fs";
 
 dotenv.config();
 
@@ -142,29 +144,90 @@ function generateRandomTime(minHours = 3, maxHours = 6) {
   return `${hours}:${minutes}`;
 }
 
+// Initialize S3 client
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+// Upload single file to S3
+async function uploadToS3(filePath, key) {
+  const fileStream = createReadStream(filePath);
+
+  const command = new PutObjectCommand({
+    Bucket: "bucket-kita-laham",
+    Key: key,
+    Body: fileStream,
+    ContentType: "audio/mpeg",
+  });
+
+  await s3.send(command);
+  console.log("✅ Uploaded to S3:", key);
+}
+
+// Upload all files from a folder to S3
+async function uploadFolderToS3(username) {
+  const localDir = path.join(__dirname, "../audio/output", username);
+
+  if (!fs.existsSync(localDir)) {
+    console.log(`⚠️ Folder not found: ${localDir}`);
+    return;
+  }
+
+  const files = fs.readdirSync(localDir);
+  console.log(`📤 Uploading ${files.length} files for ${username}...`);
+
+  for (const file of files) {
+    const fullPath = path.join(localDir, file);
+    if (fs.statSync(fullPath).isFile()) {
+      await uploadToS3(fullPath, `${username}/${file}`);
+    }
+  }
+
+  console.log(`✅ All files uploaded for ${username}`);
+}
+
 // Handle complete session cycle
 async function handleSessionComplete(group) {
   console.log(`\n🔄 SESSION CYCLE START: ${group.name}`);
 
   try {
     // Step 1: Delete audio folders
-    console.log(`📁 Step 1/3: Deleting audio folders...`);
+    console.log(`📁 Step 1/4: Deleting audio folders...`);
     const deletePromises = group.users.map((user) =>
       deleteAudioFolder(user.name),
     );
     await Promise.all(deletePromises);
 
-    // Step 2: Run Python script (fire-and-forget, don't wait)
-    console.log(`🐍 Step 2/3: Starting Python audio generator (background)...`);
-    runPythonScript().catch((err) => console.error("Python error:", err)); // ✅ No await
+    // Step 2: Run Python script and WAIT for completion
+    console.log(`🐍 Step 2/4: Running Python audio generator...`);
+    await runPythonScript(); // ✅ Wait for Python to finish
+    console.log(`✅ Python script completed`);
 
-    // Step 3: Generate random time immediately
-    console.log(`⏰ Step 3/3: Generating new schedule...`);
+    // Step 3: Upload newly generated files to S3
+    console.log(`☁️ Step 3/4: Uploading files to S3...`);
+    const uploadPromises = group.users.map((user) =>
+      uploadFolderToS3(user.name),
+    );
+    await Promise.all(uploadPromises);
+    console.log(`✅ All files uploaded to S3`);
+
+    // Step 4: Generate random time
+    console.log(`⏰ Step 4/4: Generating new schedule...`);
     const newTime = generateRandomTime(3, 6);
     console.log(`✅ New time: ${newTime}`);
 
     // Reset and notify
     group.users.forEach((user) => (user.hasFinishedPlaying = false));
+
+    // Notify players to refresh audio list
+    broadcastToGroup(group.name, {
+      type: "REFRESH_AUDIO_LIST",
+      message: "New audio files generated and uploaded",
+    });
 
     broadcastToMasters({
       type: "SESSION_CYCLE_COMPLETE",
@@ -337,4 +400,34 @@ wss.on("connection", (ws, req) => {
     });
     console.log(`[Disconnected] ${clientId}`);
   });
+});
+
+/* -------------------- AUDIO API -------------------- */
+function getPlayerAudios(playerName) {
+  const dir = path.join(AUDIO_BASE_PATH, playerName);
+  if (!fs.existsSync(dir)) return [];
+
+  return fs.readdirSync(dir).map((file) => ({
+    id: file,
+    name: file.replace(/\.[^/.]+$/, ""),
+    url: `/audio/${playerName}/${file}`,
+    duration: 180,
+  }));
+}
+
+app.get("/api/audios/:playerName", (req, res) => {
+  res.json({
+    audios: getPlayerAudios(req.params.playerName),
+  });
+});
+
+/* -------------------- ERROR HANDLING -------------------- */
+wss.on("error", (error) => {
+  console.error("❌ WebSocket Server Error:", error);
+});
+
+/* -------------------- START -------------------- */
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🔌 WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
 });

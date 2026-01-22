@@ -16,3 +16,6 @@ pnpm-debug.log*
 *.swo
 *~
 .DS_Store
+
+.env
+.env.local
