@@ -2,10 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 
-const WS_URL =
-  import.meta?.env?.VITE_WS_URL ||
-  process.env?.VITE_WS_URL ||
-  "ws://192.168.212.250/ws";
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export default function Master() {
   const [groups, setGroups] = useState([]);

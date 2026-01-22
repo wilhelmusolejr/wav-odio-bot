@@ -32,7 +32,7 @@ app.use(
 
 /* -------------------- SERVER -------------------- */
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: "/ws" });
 
 /* -------------------- STATE -------------------- */
 const clients = new Map(); // clientId → ws meta
