@@ -1,1 +1,2 @@
-VITE_WS_URL=ws://ip/ws
+VITE_WS_URL=
+VITE_API_URL=

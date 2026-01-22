@@ -32,7 +32,14 @@ app.use(
 
 /* -------------------- SERVER -------------------- */
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+const wss = new WebSocketServer({
+  server,
+  path: "/ws",
+  verifyClient: (info) => {
+    // Allow all origins for WebSocket connections
+    return true;
+  },
+});
 
 /* -------------------- STATE -------------------- */
 const clients = new Map(); // clientId → ws meta
@@ -61,15 +68,16 @@ function broadcastToGroup(groupName, payload) {
 }
 
 /* -------------------- WEBSOCKET -------------------- */
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   const clientId = `client-${++clientIdCounter}`;
+  const clientIP = req.socket.remoteAddress;
   ws.clientId = clientId;
   ws.role = null;
   ws.groupName = null;
   ws.playerName = null;
 
   clients.set(clientId, ws);
-  console.log(`[Connected] ${clientId}`);
+  console.log(`[Connected] ${clientId} from ${clientIP}`);
 
   ws.on("message", (raw) => {
     const msg = JSON.parse(raw);
@@ -211,7 +219,13 @@ app.get("/api/audios/:playerName", (req, res) => {
   });
 });
 
+/* -------------------- ERROR HANDLING -------------------- */
+wss.on("error", (error) => {
+  console.error("❌ WebSocket Server Error:", error);
+});
+
 /* -------------------- START -------------------- */
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🔌 WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
 });
