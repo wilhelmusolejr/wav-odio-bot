@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { spawn } from "child_process";
 
 dotenv.config();
 
@@ -65,6 +66,121 @@ function broadcastToGroup(groupName, payload) {
       c.send(JSON.stringify(payload));
     }
   });
+}
+
+// Delete audio folder for a player
+function deleteAudioFolder(playerName) {
+  const folderPath = path.join(AUDIO_BASE_PATH, playerName);
+
+  console.log(`🔍 Attempting to delete: ${folderPath}`);
+
+  return new Promise((resolve, reject) => {
+    try {
+      if (fs.existsSync(folderPath)) {
+        console.log(`✅ Folder exists, deleting...`);
+        fs.rmSync(folderPath, { recursive: true, force: true });
+        console.log(`🗑️ Successfully deleted: ${folderPath}`);
+        resolve();
+      } else {
+        console.log(`⚠️ Folder does not exist: ${folderPath}`);
+        resolve();
+      }
+    } catch (error) {
+      console.error(`❌ Error deleting ${folderPath}:`, error);
+      reject(error);
+    }
+  });
+}
+
+// Run Python audio generator script
+function runPythonScript() {
+  return new Promise((resolve, reject) => {
+    const pythonScript = path.join(__dirname, "../audio/main.py");
+    const audioDir = path.join(__dirname, "../audio");
+
+    console.log(`🐍 Running: ${pythonScript}`);
+
+    const pythonProcess = spawn("python", ["main.py"], {
+      cwd: audioDir,
+      shell: true,
+    });
+
+    pythonProcess.stdout.on("data", (data) => {
+      console.log(`[Python] ${data.toString().trim()}`);
+    });
+
+    pythonProcess.stderr.on("data", (data) => {
+      console.error(`[Python Error] ${data.toString().trim()}`);
+    });
+
+    pythonProcess.on("close", (code) => {
+      if (code === 0) {
+        console.log(`✅ Python script completed`);
+        resolve();
+      } else {
+        console.error(`❌ Python script failed with code ${code}`);
+        reject(new Error(`Python failed: code ${code}`));
+      }
+    });
+
+    pythonProcess.on("error", (error) => {
+      console.error(`❌ Failed to start Python:`, error);
+      reject(error);
+    });
+  });
+}
+
+// Generate random time 3-6 hours from now
+function generateRandomTime(minHours = 3, maxHours = 6) {
+  const now = new Date();
+  const randomHours = Math.random() * (maxHours - minHours) + minHours;
+  const futureTime = new Date(now.getTime() + randomHours * 60 * 60 * 1000);
+
+  const hours = String(futureTime.getHours()).padStart(2, "0");
+  const minutes = String(futureTime.getMinutes()).padStart(2, "0");
+
+  return `${hours}:${minutes}`;
+}
+
+// Handle complete session cycle
+async function handleSessionComplete(group) {
+  console.log(`\n🔄 SESSION CYCLE START: ${group.name}`);
+
+  try {
+    // Step 1: Delete audio folders
+    console.log(`📁 Step 1/3: Deleting audio folders...`);
+    const deletePromises = group.users.map((user) =>
+      deleteAudioFolder(user.name),
+    );
+    await Promise.all(deletePromises);
+
+    // Step 2: Run Python script (fire-and-forget, don't wait)
+    console.log(`🐍 Step 2/3: Starting Python audio generator (background)...`);
+    runPythonScript().catch((err) => console.error("Python error:", err)); // ✅ No await
+
+    // Step 3: Generate random time immediately
+    console.log(`⏰ Step 3/3: Generating new schedule...`);
+    const newTime = generateRandomTime(3, 6);
+    console.log(`✅ New time: ${newTime}`);
+
+    // Reset and notify
+    group.users.forEach((user) => (user.hasFinishedPlaying = false));
+
+    broadcastToMasters({
+      type: "SESSION_CYCLE_COMPLETE",
+      groupName: group.name,
+      newScheduledTime: newTime,
+    });
+
+    console.log(`✅ SESSION CYCLE COMPLETE: ${group.name}\n`);
+  } catch (error) {
+    console.error(`❌ SESSION CYCLE ERROR:`, error);
+    broadcastToMasters({
+      type: "SESSION_CYCLE_ERROR",
+      groupName: group.name,
+      error: error.message,
+    });
+  }
 }
 
 /* -------------------- WEBSOCKET -------------------- */
@@ -151,20 +267,43 @@ wss.on("connection", (ws, req) => {
 
       /* 🔥 FIXED MESSAGE TYPE */
       case "PLAYER_FINISHED_PLAYING": {
+        console.log(`📩 Player finished playing message received`);
         const group = groups.get(ws.groupName);
-        if (!group) return;
+        if (!group) {
+          console.log(`⚠️ Group not found: ${ws.groupName}`);
+          return;
+        }
 
         const player = group.users.find((u) => u.id === clientId);
-        if (player) player.hasFinishedPlaying = true;
+        if (player) {
+          player.hasFinishedPlaying = true;
+          console.log(`✅ Marked player ${player.name} as finished`);
+        }
+
+        const finishedCount = group.users.filter(
+          (u) => u.hasFinishedPlaying,
+        ).length;
+        const totalCount = group.users.length;
+        console.log(
+          `📊 Group ${group.name}: ${finishedCount}/${totalCount} finished`,
+        );
 
         const allFinished = group.users.every((u) => u.hasFinishedPlaying);
 
         if (allFinished) {
-          console.log(`[Group Complete] ${group.name}`);
+          console.log(
+            `🎉 [Group Complete] ${group.name} - ALL PLAYERS FINISHED!`,
+          );
 
           broadcastToMasters({
             type: "GROUP_PLAYBACK_COMPLETE",
             groupName: group.name,
+          });
+
+          // Start session cycle (delete → regenerate → reschedule)
+          console.log(`🚀 Triggering session cycle for ${group.name}...`);
+          handleSessionComplete(group).catch((err) => {
+            console.error(`❌ Session cycle failed:`, err);
           });
         }
         break;
@@ -198,34 +337,4 @@ wss.on("connection", (ws, req) => {
     });
     console.log(`[Disconnected] ${clientId}`);
   });
-});
-
-/* -------------------- AUDIO API -------------------- */
-function getPlayerAudios(playerName) {
-  const dir = path.join(AUDIO_BASE_PATH, playerName);
-  if (!fs.existsSync(dir)) return [];
-
-  return fs.readdirSync(dir).map((file) => ({
-    id: file,
-    name: file.replace(/\.[^/.]+$/, ""),
-    url: `/audio/${playerName}/${file}`,
-    duration: 180,
-  }));
-}
-
-app.get("/api/audios/:playerName", (req, res) => {
-  res.json({
-    audios: getPlayerAudios(req.params.playerName),
-  });
-});
-
-/* -------------------- ERROR HANDLING -------------------- */
-wss.on("error", (error) => {
-  console.error("❌ WebSocket Server Error:", error);
-});
-
-/* -------------------- START -------------------- */
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
-  console.log(`🔌 WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
 });

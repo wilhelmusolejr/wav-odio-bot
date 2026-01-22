@@ -429,7 +429,7 @@ export default function Player() {
         </div>
 
         {/* Content */}
-        <div className="relative z-10 w-full max-w-7xl mx-auto">
+        <div className="relative z-10 w-full max-w-7xl mx-auto py-16">
           {/* Header */}
           <div className="mb-8">
             <div className="flex items-center justify-between mb-4">

@@ -16,9 +16,9 @@ BACKGROUND_NOISES = ["fan", "white_noise", "none"]
 AUDIOS_TO_GENERATE = 1
 
 CONFIG = [
-      {
-        "username": "jeroam", 
-        "voice_type": "ai_kael", 
+    {
+        "username": "botfrag666", 
+        "voice_type": "real_brendan666", 
         "noises": "white_noise", 
         "audios": AUDIOS_TO_GENERATE
     }
@@ -37,7 +37,8 @@ SR = 8000  # Sample rate (Hz)
 USE_MULTIPROCESSING = True  # Enable parallel processing
 
 # Duration Settings (in seconds)
-BASE_DURATION_SECONDS = 1 * 3600 + 20 * 60  # 1 hour 20 minutes (80 min)
+BASE_DURATION_SECONDS = 1  # 1 hour 20 minutes (80 min)
+# BASE_DURATION_SECONDS = 1 * 3600 + 20 * 60  # 1 hour 20 minutes (80 min)
 EXTRA_DURATION_MIN = 5 * 60  # Minimum extra duration (5 min)
 EXTRA_DURATION_MAX = 15 * 60  # Maximum extra duration (15 min)
 

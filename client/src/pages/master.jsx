@@ -87,10 +87,14 @@ export default function Master() {
             `⏱️ [${group.name}] Countdown check - Previous: ${previousSeconds}, Current: ${totalSeconds}`,
           );
 
+          let triggerSecond = 16; // Default trigger second
+
           // Trigger when countdown transitions to 0-5 seconds (natural trigger)
           // OR when seconds go from positive to small number (within 5 seconds of target)
           if (
-            (previousSeconds > 5 && totalSeconds <= 5 && totalSeconds >= 0) ||
+            (previousSeconds > triggerSecond &&
+              totalSeconds <= triggerSecond &&
+              totalSeconds >= 0) ||
             (previousSeconds > 0 && totalSeconds === 0)
           ) {
             // Check if we've already triggered this time
@@ -100,16 +104,16 @@ export default function Master() {
               triggeredTimesRef.current.add(triggerKey);
 
               console.log(
-                `🚀 Auto-trigger time reached! Playing all users in group: ${group.name} at ${currentTime}`,
+                `🚀 Auto-trigger time reached! Playing all users in group: ${group.name}`,
               );
 
-              // Auto-trigger play for all users in this group
+              // 1️⃣ Update local state to "playing"
               setGroupControls((prev) => ({
                 ...prev,
                 [group.name]: { ...prev[group.name], isPlaying: true },
               }));
 
-              // Send play command to all players in the group
+              // 2️⃣ Send WebSocket message to all players
               if (
                 wsRef.current &&
                 wsRef.current.readyState === WebSocket.OPEN
@@ -126,10 +130,10 @@ export default function Master() {
                 );
               }
 
-              // Clear the trigger key after 1 minute so it can trigger again tomorrow
+              // 3️⃣ Clear trigger after 1 minute (prevents duplicate triggers)
               setTimeout(() => {
                 triggeredTimesRef.current.delete(triggerKey);
-              }, 60000); // 1 minute
+              }, 60000);
             }
           }
 
@@ -182,6 +186,17 @@ export default function Master() {
 
           case "GROUP_PLAYBACK_COMPLETE":
             handleGroupPlaybackComplete(data.groupName);
+            break;
+
+          case "SESSION_CYCLE_COMPLETE":
+            handleSessionCycleComplete(data.groupName, data.newScheduledTime);
+            break;
+
+          case "SESSION_CYCLE_ERROR":
+            console.error(
+              `❌ Session cycle error: ${data.groupName}`,
+              data.error,
+            );
             break;
 
           case "GROUP_PLAYBACK_STATUS":
@@ -289,6 +304,31 @@ export default function Master() {
     }
   }
 
+  function handleSessionCycleComplete(groupName, newScheduledTime) {
+    console.log(
+      `🔄 [${groupName}] Session cycle complete! New time: ${newScheduledTime}`,
+    );
+
+    // Update scheduled time
+    setGroupControls((prev) => ({
+      ...prev,
+      [groupName]: {
+        ...prev[groupName],
+        time: newScheduledTime,
+        isPlaying: false,
+      },
+    }));
+
+    // Clear old trigger
+    const oldTrigger = `${groupName}-${groupControls[groupName]?.time}`;
+    triggeredTimesRef.current.delete(oldTrigger);
+
+    // Reset countdown tracking
+    delete previousCountdownsRef.current[groupName];
+
+    console.log(`✅ Updated ${groupName} schedule to ${newScheduledTime}`);
+  }
+
   function handleGroupPlaybackStatus(groupName, finishedCount, totalCount) {
     console.log(
       `📊 [${groupName}] Playback status: ${finishedCount}/${totalCount} players finished`,
@@ -372,7 +412,7 @@ export default function Master() {
   };
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden py-32">
+    <div className="min-h-screen bg-black relative overflow-hidden py-16">
       {/* Floating gradient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div
@@ -414,7 +454,7 @@ export default function Master() {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-8">
+      <div className="relative z-10 w-full max-w-7xl mx-auto py-16">
         {/* Heading with Connection Status */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
