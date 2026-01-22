@@ -2,7 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 
-const WS_URL = "ws://192.168.177.251:8080";
+const WS_URL =
+  import.meta?.env?.VITE_WS_URL ||
+  process.env?.VITE_WS_URL ||
+  "ws://192.168.212.250/ws";
 
 export default function Master() {
   const [groups, setGroups] = useState([]);
