@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import GroupCard from "../components/GroupCard";
 import NotificationList from "../components/NotificationList";
 
@@ -9,6 +9,11 @@ export default function Master() {
   const [groups, setGroups] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [finishedPlayers, setFinishedPlayers] = useState({}); // Track finished players per group
+  const [scheduleMode, setScheduleMode] = useState("time"); // "time" | "countdown"
+  const [targetTime, setTargetTime] = useState(""); // "HH:MM" (24h)
+  const [countdownSec, setCountdownSec] = useState(0); // seconds
+  const [countdownLeft, setCountdownLeft] = useState(null);
+  const [scheduledGroup, setScheduledGroup] = useState("");
   const wsRef = useRef(null);
   const groupsRef = useRef([]); // 🆕 Add ref to track latest groups
 
@@ -225,6 +230,59 @@ export default function Master() {
     }
   };
 
+  // Start a schedule
+  const schedulePlay = (groupName) => {
+    if (!groupName) return;
+    setScheduledGroup(groupName);
+
+    if (scheduleMode === "countdown" && countdownSec > 0) {
+      setCountdownLeft(countdownSec);
+    }
+  };
+
+  // Tick timer
+  useEffect(() => {
+    if (!scheduledGroup) return;
+
+    const timer = setInterval(() => {
+      if (scheduleMode === "time" && targetTime) {
+        const now = new Date();
+        const [h, m] = targetTime.split(":").map(Number);
+        if (
+          now.getHours() === h &&
+          now.getMinutes() === m &&
+          now.getSeconds() === 0
+        ) {
+          sendPlayCommand(scheduledGroup);
+          setScheduledGroup("");
+        }
+      } else if (scheduleMode === "countdown" && countdownLeft !== null) {
+        setCountdownLeft((prev) => {
+          if (prev === null) return prev;
+          if (prev <= 1) {
+            sendPlayCommand(scheduledGroup);
+            setScheduledGroup("");
+            return null;
+          }
+          return prev - 1;
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [scheduleMode, targetTime, countdownLeft, scheduledGroup]);
+
+  // Format remaining for UI
+  const countdownDisplay = useMemo(() => {
+    if (countdownLeft === null) return "";
+    const h = Math.floor(countdownLeft / 3600);
+    const m = Math.floor((countdownLeft % 3600) / 60);
+    const s = countdownLeft % 60;
+    return `${h.toString().padStart(2, "0")}:${m
+      .toString()
+      .padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }, [countdownLeft]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
       <div className="max-w-7xl mx-auto">
@@ -271,7 +329,83 @@ export default function Master() {
           )}
         </div>
 
+        {/* Notifications */}
         <NotificationList notifications={notifications} />
+
+        {/* Scheduler Panel */}
+        <div className="bg-gray-800 rounded-lg p-4 mt-6">
+          <h3 className="text-lg font-semibold mb-3">🕒 Auto Play Scheduler</h3>
+
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="schedMode"
+                value="time"
+                checked={scheduleMode === "time"}
+                onChange={() => setScheduleMode("time")}
+              />
+              At time (HH:MM)
+            </label>
+            <input
+              type="time"
+              className="bg-gray-700 px-2 py-1 rounded"
+              value={targetTime}
+              onChange={(e) => setTargetTime(e.target.value)}
+              disabled={scheduleMode !== "time"}
+            />
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="schedMode"
+                value="countdown"
+                checked={scheduleMode === "countdown"}
+                onChange={() => setScheduleMode("countdown")}
+              />
+              After countdown (sec)
+            </label>
+            <input
+              type="number"
+              min={1}
+              className="bg-gray-700 px-2 py-1 rounded w-24"
+              value={countdownSec}
+              onChange={(e) => setCountdownSec(Number(e.target.value || 0))}
+              disabled={scheduleMode !== "countdown"}
+            />
+
+            <select
+              className="bg-gray-700 px-2 py-1 rounded"
+              value={scheduledGroup}
+              onChange={(e) => setScheduledGroup(e.target.value)}
+            >
+              <option value="">Select group</option>
+              {groups.map((g) => (
+                <option key={g.name} value={g.name}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => schedulePlay(scheduledGroup)}
+              className="px-4 py-2 bg-green-600 rounded hover:bg-green-700"
+              disabled={!scheduledGroup}
+            >
+              Schedule Play
+            </button>
+          </div>
+
+          {scheduledGroup && (
+            <p className="text-sm text-gray-300">
+              Scheduled for{" "}
+              <span className="font-semibold">{scheduledGroup}</span>{" "}
+              {scheduleMode === "time"
+                ? `at ${targetTime || "—"}`
+                : `in ${countdownDisplay || "—"}`}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
