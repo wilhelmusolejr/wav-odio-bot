@@ -104,29 +104,22 @@ export default function Master() {
               triggeredTimesRef.current.add(triggerKey);
 
               console.log(
-                `🚀 Auto-trigger time reached! Playing all users in group: ${group.name}`,
+                `🚀 Auto-trigger time reached! Assigning audio for group: ${group.name}`,
               );
 
-              // 1️⃣ Update local state to "playing"
-              setGroupControls((prev) => ({
-                ...prev,
-                [group.name]: { ...prev[group.name], isPlaying: true },
-              }));
-
-              // 2️⃣ Send WebSocket message to all players
+              // 🆕 1️⃣ Send request to server to assign audio to all players
               if (
                 wsRef.current &&
                 wsRef.current.readyState === WebSocket.OPEN
               ) {
                 wsRef.current.send(
                   JSON.stringify({
-                    type: "UPDATE_GROUP_CONTROL",
+                    type: "ASSIGN_GROUP_AUDIO",
                     groupName: group.name,
-                    control: {
-                      isPlaying: true,
-                      time: scheduledTime,
-                    },
                   }),
+                );
+                console.log(
+                  `📤 Sent ASSIGN_GROUP_AUDIO request for ${group.name}`,
                 );
               }
 
@@ -171,6 +164,7 @@ export default function Master() {
       return () => clearInterval(pingInterval);
     };
 
+    // 🆕 Add handler for when all players are ready
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -183,6 +177,7 @@ export default function Master() {
 
           case "UPDATE_GROUPS":
             handleGroupsUpdate(data.groups);
+            break;
 
           case "GROUP_PLAYBACK_COMPLETE":
             handleGroupPlaybackComplete(data.groupName);
@@ -206,6 +201,13 @@ export default function Master() {
               data.totalCount,
             );
             break;
+
+          case "AUDIO_BALANCE_RESULT":
+            handleAudioBalanceResult(data.groupName, data.result);
+            break;
+
+          case "ALL_PLAYERS_READY":
+            handleAllPlayersReady(data.groupName);
             break;
 
           case "ERROR":
@@ -238,6 +240,38 @@ export default function Master() {
       }
     };
   }, []);
+
+  function handleAudioBalanceResult(groupName, result) {
+    console.log(`\n📊 Audio Balance Result for ${groupName}:`);
+    console.log(`   Max count: ${result.maxCount}`);
+    console.log(
+      `   Players needing audio: ${result.playersNeedingAudio.length}`,
+    );
+
+    result.audioCounts.forEach(({ username, count, files }) => {
+      const status = count < result.maxCount ? "⚠️ NEEDS AUDIO" : "✅ OK";
+      console.log(`\n   ${status} ${username}: ${count} files`);
+
+      // ✅ Log file details
+      if (files && files.length > 0) {
+        console.log(`   Files:`);
+        files.forEach((file, index) => {
+          console.log(`     ${index + 1}. ${file.filename}`);
+          console.log(`        URL: ${file.s3Url}`);
+          console.log(`        Size: ${(file.size / 1024).toFixed(2)} KB`);
+        });
+      }
+    });
+
+    if (result.playersNeedingAudio.length > 0) {
+      const playerNames = result.playersNeedingAudio
+        .map((p) => p.username)
+        .join(", ");
+      console.log(`\n⚠️ Players needing audio generation: ${playerNames}`);
+    } else {
+      console.log(`\n✅ All players have balanced audio counts`);
+    }
+  }
 
   function handleInitialGroups(serverGroups) {
     setGroups(serverGroups);
@@ -335,10 +369,64 @@ export default function Master() {
     );
   }
 
+  // 🆕 Handle when all players in group are ready
+  function handleAllPlayersReady(groupName) {
+    console.log("\n🎉 ===== ALL PLAYERS READY =====");
+    console.log(`Group: ${groupName}`);
+    console.log(`All players have loaded their audio files!`);
+    console.log("================================\n");
+
+    // 🎵 Auto-start playback when all players are ready
+    console.log(`▶️ Starting playback for ${groupName}...`);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "UPDATE_GROUP_CONTROL",
+          groupName: groupName,
+          control: {
+            isPlaying: true,
+            currentAudioIndex: 0,
+          },
+        }),
+      );
+      console.log(`✅ Sent START_PLAYBACK command to ${groupName}`);
+    }
+
+    // Update local state to playing
+    setGroupControls((prev) => ({
+      ...prev,
+      [groupName]: { ...prev[groupName], isPlaying: true },
+    }));
+  }
+
   const toggleGroupPlayPause = (groupName) => {
     const newState = !groupControls[groupName]?.isPlaying;
     const time = groupControls[groupName]?.time || "08:00";
 
+    // If playing (turning on), first assign audio to players
+    if (newState === true) {
+      console.log(
+        `🎵 Play button pressed for ${groupName} - Assigning audio first...`,
+      );
+
+      // Send ASSIGN_GROUP_AUDIO request to server
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "ASSIGN_GROUP_AUDIO",
+            groupName: groupName,
+          }),
+        );
+        console.log(`📤 Sent ASSIGN_GROUP_AUDIO for ${groupName}`);
+        console.log(`⏳ Waiting for all players to be ready...`);
+      }
+
+      // Don't update state yet - wait for ALL_PLAYERS_READY event
+      return;
+    }
+
+    // If pausing, just send the control update
     setGroupControls((prev) => ({
       ...prev,
       [groupName]: { ...prev[groupName], isPlaying: newState },
@@ -351,7 +439,7 @@ export default function Master() {
           groupName,
           control: {
             isPlaying: newState,
-            time, // ✅ send finalized time here
+            time,
           },
         }),
       );
@@ -409,6 +497,62 @@ export default function Master() {
     const period = hour >= 12 ? "PM" : "AM";
     const displayHour = hour % 12 || 12;
     return `${displayHour}:${String(minute).padStart(2, "0")} ${period}`;
+  };
+
+  const checkAudioBalance = (groupName) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log(`🔍 Checking audio balance for group: ${groupName}`);
+      wsRef.current.send(
+        JSON.stringify({
+          type: "CHECK_AUDIO_BALANCE",
+          groupName: groupName,
+        }),
+      );
+    } else {
+      console.error("WebSocket not connected");
+    }
+  };
+
+  const handlePlayGroup = (groupName) => {
+    console.log(`▶️ Play button clicked for: ${groupName}`);
+
+    // Simply tell players to start playing whatever audio they have loaded
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "START_GROUP_PLAYBACK",
+          groupName,
+        }),
+      );
+      console.log(`📤 Sent START_GROUP_PLAYBACK to ${groupName}`);
+    }
+
+    setGroupControls((prev) => ({
+      ...prev,
+      [groupName]: { ...prev[groupName], isPlaying: true },
+    }));
+  };
+
+  const handlePauseGroup = (groupName) => {
+    console.log(`⏸️ Pausing group: ${groupName}`);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "UPDATE_GROUP_CONTROL",
+          groupName,
+          control: {
+            isPlaying: false,
+            time: groupControls[groupName]?.time,
+          },
+        }),
+      );
+    }
+
+    setGroupControls((prev) => ({
+      ...prev,
+      [groupName]: { ...prev[groupName], isPlaying: false },
+    }));
   };
 
   return (
@@ -542,16 +686,32 @@ export default function Master() {
 
                   {/* Group Play/Pause Button */}
                   <button
-                    onClick={() => toggleGroupPlayPause(group.name)}
-                    className={`w-full font-semibold py-2 px-2 rounded-lg transition text-sm border ${
+                    onClick={() => {
+                      const isCurrentlyPlaying =
+                        groupControls[group.name]?.isPlaying;
+                      if (isCurrentlyPlaying) {
+                        handlePauseGroup(group.name);
+                      } else {
+                        handlePlayGroup(group.name);
+                      }
+                    }}
+                    className={`px-4 py-2 rounded-lg font-semibold transition ${
                       groupControls[group.name]?.isPlaying
-                        ? "bg-gray-700 text-white border-gray-600 hover:bg-gray-600"
-                        : "bg-gray-800 text-gray-200 border-gray-600 hover:border-gray-500"
+                        ? "bg-gray-600 hover:bg-gray-700 text-white"
+                        : "bg-green-600 hover:bg-green-700 text-white"
                     }`}
                   >
                     {groupControls[group.name]?.isPlaying
-                      ? "⏸ Pause"
-                      : "▶ Play"}
+                      ? "⏸ Pause Group"
+                      : "▶ Play Group"}
+                  </button>
+
+                  {/* 🆕 Add this test button */}
+                  <button
+                    onClick={() => checkAudioBalance(group.name)}
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 rounded text-sm"
+                  >
+                    🔍 Check Audio Balance
                   </button>
                 </div>
 
