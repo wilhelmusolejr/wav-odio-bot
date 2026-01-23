@@ -1,0 +1,199 @@
+import React, { useState, useEffect, useRef } from "react";
+
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
+
+export default function Hidemium() {
+  const [connected, setConnected] = useState(false);
+  const [groups, setGroups] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
+  const wsRef = useRef(null);
+
+  // WebSocket connection
+  useEffect(() => {
+    const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      console.log("✅ Hidemium connected to WebSocket server");
+      setConnected(true);
+      ws.send(JSON.stringify({ type: "JOIN_MASTER" }));
+      console.log("📤 Sent JOIN_MASTER");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("📨 Message from server:", data.type);
+
+        switch (data.type) {
+          case "PONG":
+            console.log("💓 Heartbeat");
+            break;
+
+          case "GROUPS_UPDATE":
+            console.log("📊 Groups updated:", data.groups);
+            setGroups(data.groups);
+            break;
+
+          case "INITIAL_GROUPS":
+            console.log("📋 Initial groups:", data.groups);
+            setGroups(data.groups);
+            break;
+
+          default:
+            console.log("⚠️ Unknown message type:", data.type);
+        }
+      } catch (error) {
+        console.error("❌ Error parsing message:", error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("❌ WebSocket error:", error);
+      setConnected(false);
+    };
+
+    ws.onclose = () => {
+      console.log("🔌 Disconnected from server");
+      setConnected(false);
+    };
+
+    wsRef.current = ws;
+
+    // Heartbeat
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "PING" }));
+      }
+    }, 30000);
+
+    return () => {
+      clearInterval(pingInterval);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
+  }, []);
+
+  const handleCheckboxChange = (groupName) => {
+    setSelectedGroups((prev) => {
+      const newSelected = new Set(prev);
+      if (newSelected.has(groupName)) {
+        newSelected.delete(groupName);
+      } else {
+        newSelected.add(groupName);
+      }
+      return newSelected;
+    });
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <h1 className="text-5xl font-bold">🖥️ Hidemium Control</h1>
+
+            {/* Connection Status */}
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-3 h-3 rounded-full ${
+                  connected ? "bg-green-400" : "bg-red-400"
+                }`}
+              ></div>
+              <span className="text-sm font-semibold">
+                {connected ? "Connected" : "Disconnected"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Groups Grid */}
+        {groups.length === 0 ? (
+          <div className="bg-gray-800 rounded-lg p-8 text-center">
+            <p className="text-gray-400 text-lg">
+              ⏳ Waiting for groups to load...
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {groups.map((group) => (
+              <div
+                key={group.name}
+                className={`bg-gray-800 rounded-lg p-6 hover:bg-gray-750 transition ${
+                  selectedGroups.has(group.name) ? "ring-2 ring-blue-500" : ""
+                }`}
+              >
+                {/* Group Name */}
+                <h3 className="text-xl font-bold mb-4">🌐 {group.name}</h3>
+
+                {/* Server Name */}
+                <div className="mb-3">
+                  <label className="text-sm text-gray-400 block mb-1">
+                    Server Name
+                  </label>
+                  <p id="server_name" className="text-white font-medium">
+                    {group.name}
+                  </p>
+                </div>
+
+                {/* Status */}
+                <div className="mb-3">
+                  <label className="text-sm text-gray-400 block mb-1">
+                    Status
+                  </label>
+                  <p
+                    id="status"
+                    className="text-yellow-400 font-medium text-sm"
+                  >
+                    no bot
+                  </p>
+                </div>
+
+                {/* Players Count */}
+                <div className="mb-4">
+                  <label className="text-sm text-gray-400 block mb-1">
+                    Players
+                  </label>
+                  <p className="text-white font-medium text-sm">
+                    👥 {group.players.length} player(s)
+                  </p>
+                </div>
+
+                {/* Checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedGroups.has(group.name)}
+                    onChange={() => handleCheckboxChange(group.name)}
+                    className="w-5 h-5"
+                  />
+                  <span className="text-sm">Select this group</span>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Selected Groups Summary */}
+        {selectedGroups.size > 0 && (
+          <div className="mt-8 bg-gray-800 rounded-lg p-6">
+            <h3 className="text-xl font-bold mb-4">
+              ✅ Selected Groups ({selectedGroups.size})
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {Array.from(selectedGroups).map((groupName) => (
+                <span
+                  key={groupName}
+                  className="px-3 py-1 bg-blue-600 rounded-full text-sm"
+                >
+                  {groupName}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
