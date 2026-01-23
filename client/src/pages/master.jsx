@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import GroupCard from "../components/GroupCard";
 import NotificationList from "../components/NotificationList";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
@@ -24,8 +23,6 @@ export default function Master() {
   useEffect(() => {
     groupsRef.current = groups;
   }, [groups]);
-
-  // 🔥 REMOVED: localStorage loading/saving
 
   // WebSocket setup
   useEffect(() => {
