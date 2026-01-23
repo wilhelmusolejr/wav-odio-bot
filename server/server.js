@@ -205,13 +205,12 @@ wss.on("connection", (ws, req) => {
               console.log(
                 `\n🎉 All players in group ${groupName} have finished!`,
               );
-              console.log(`🔄 Starting audio regeneration workflow...\n`);
+              console.log(
+                `📢 Waiting for master to trigger regeneration (no auto-run on server)\n`,
+              );
 
-              // Clear finished players for this group
+              // Clear finished players for this group; master will coordinate regeneration
               groupFinishedPlayers.delete(groupName);
-
-              // Start the workflow
-              handleAudioRegeneration(group);
             }
           }
           break;
@@ -283,13 +282,14 @@ wss.on("connection", (ws, req) => {
       if (group.players.length === 0) {
         groups.delete(ws.groupName);
         console.log(`🗑️ Deleted empty group: ${ws.groupName}`);
-      } else {
-        // Broadcast update
-        broadcastToMasters({
-          type: "GROUPS_UPDATE",
-          groups: Array.from(groups.values()),
-        });
       }
+
+      // 🆕 Broadcast updated groups to all masters
+      broadcastToMasters({
+        type: "GROUPS_UPDATE",
+        groups: Array.from(groups.values()),
+      });
+      console.log(`📤 Sent GROUPS_UPDATE to masters (player disconnected)`);
     }
 
     clients.delete(clientId);
@@ -586,29 +586,6 @@ async function triggerAudioGenerator(groupName, playerNames) {
       reject(error);
     });
   });
-
-  /* ACTUAL IMPLEMENTATION (commented out for simulation):
-  return new Promise((resolve, reject) => {
-    const pythonScript = spawn('python', ['audio/main.py', '--group', group.name]);
-
-    pythonScript.stdout.on('data', (data) => {
-      console.log(`   🐍 ${data.toString()}`);
-    });
-
-    pythonScript.stderr.on('data', (data) => {
-      console.error(`   ❌ ${data.toString()}`);
-    });
-
-    pythonScript.on('close', (code) => {
-      if (code === 0) {
-        console.log(`   ✅ Python audio generator finished successfully`);
-        resolve();
-      } else {
-        reject(new Error(`Python script exited with code ${code}`));
-      }
-    });
-  });
-  */
 }
 
 async function uploadNewAudios(username) {

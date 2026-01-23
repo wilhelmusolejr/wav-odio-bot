@@ -4,6 +4,7 @@ export function usePlayerWebSocket({
   wsUrl,
   playerName,
   groupName,
+  enabled = true, // 🆕 Add enabled prop with default true
   onConnected,
   onJoinSuccess,
   onLoadAudio,
@@ -17,7 +18,7 @@ export function usePlayerWebSocket({
     onStartPlayback,
   });
 
-  // Keep callbacks ref up to date
+  // Keep callbacks up to date
   useEffect(() => {
     callbacksRef.current = {
       onConnected,
@@ -28,13 +29,19 @@ export function usePlayerWebSocket({
   });
 
   useEffect(() => {
+    // 🔥 Don't connect if not enabled or missing credentials
+    if (!enabled || !playerName || !groupName) {
+      console.log("⏸️ WebSocket connection disabled or missing credentials");
+      return;
+    }
+
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       console.log("✅ Player connected to WebSocket server");
-      callbacksRef.current.onConnected(true);
+      callbacksRef.current.onConnected?.(true);
 
-      // Auto-join with provided values
+      // Auto-join with provided credentials
       setTimeout(() => {
         ws.send(
           JSON.stringify({
@@ -59,22 +66,20 @@ export function usePlayerWebSocket({
 
           case "JOIN_SUCCESS":
             console.log("✅ Joined successfully:", data);
-            callbacksRef.current.onJoinSuccess(data);
+            callbacksRef.current.onJoinSuccess?.(data);
             break;
 
           case "LOAD_AUDIO":
             console.log(
-              "🎵 Step 3: Received audio files from server:",
+              "🎵 Received audio files from server:",
               data.audioFiles,
             );
-            callbacksRef.current.onLoadAudio(data.audioFiles);
+            callbacksRef.current.onLoadAudio?.(data.audioFiles);
             break;
 
           case "START_PLAYBACK":
-            console.log(
-              "▶️ Step 4: Received START_PLAYBACK command from master",
-            );
-            callbacksRef.current.onStartPlayback();
+            console.log("▶️ Master sent START_PLAYBACK command");
+            callbacksRef.current.onStartPlayback?.();
             break;
 
           default:
@@ -87,12 +92,12 @@ export function usePlayerWebSocket({
 
     ws.onerror = (error) => {
       console.error("❌ WebSocket error:", error);
-      callbacksRef.current.onConnected(false);
+      callbacksRef.current.onConnected?.(false);
     };
 
     ws.onclose = () => {
       console.log("🔌 Disconnected from server");
-      callbacksRef.current.onConnected(false);
+      callbacksRef.current.onConnected?.(false);
     };
 
     wsRef.current = ws;
@@ -110,7 +115,7 @@ export function usePlayerWebSocket({
         ws.close();
       }
     };
-  }, [wsUrl, playerName, groupName]);
+  }, [wsUrl, playerName, groupName, enabled]); // 🆕 Add enabled to dependencies
 
   return wsRef;
 }

@@ -3,27 +3,34 @@ import AudioUnlockScreen from "../components/AudioUnlockScreen";
 import PlayerInfo from "../components/PlayerInfo";
 import PlayerJoinStatus from "../components/PlayerJoinStatus";
 import AudioPlaylist from "../components/AudioPlaylist";
+import PlayerSetupModal from "../components/PlayerSetupModal";
 import { usePlayerWebSocket } from "../hooks/usePlayerWebSocket";
 import { useAudioPlayer } from "../hooks/useAudioPlayer";
 import { formatTime, unlockAudioContext } from "../utils/audioUtils";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
 
-// 🧪 HARDCODED FOR TESTING
-const TEST_PLAYER_NAME = "botfrag666";
-const TEST_GROUP_NAME = "abc";
-
 export default function Player() {
   const [connected, setConnected] = useState(false);
   const [joined, setJoined] = useState(false);
   const [playerInfo, setPlayerInfo] = useState(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(true);
+  const [playerName, setPlayerName] = useState("");
+  const [groupName, setGroupName] = useState("");
 
-  // WebSocket connection
+  const handleSetupSubmit = ({ username, groupName: group }) => {
+    setPlayerName(username);
+    setGroupName(group);
+    setShowSetupModal(false);
+  };
+
+  // 🔥 Only connect WebSocket after setup is complete
   const wsRef = usePlayerWebSocket({
     wsUrl: WS_URL,
-    playerName: TEST_PLAYER_NAME,
-    groupName: TEST_GROUP_NAME,
+    playerName: playerName,
+    groupName: groupName,
+    enabled: !showSetupModal && playerName && groupName, // 🆕 Add this
     onConnected: setConnected,
     onJoinSuccess: (data) => {
       setJoined(true);
@@ -51,8 +58,8 @@ export default function Player() {
     cleanup,
   } = useAudioPlayer({
     wsRef,
-    playerName: TEST_PLAYER_NAME,
-    groupName: TEST_GROUP_NAME,
+    playerName: playerName,
+    groupName: groupName,
   });
 
   // Cleanup on unmount
@@ -74,6 +81,11 @@ export default function Player() {
     return <AudioUnlockScreen onUnlock={handleUnlock} />;
   }
 
+  // Show setup modal if not configured
+  if (showSetupModal) {
+    return <PlayerSetupModal onSubmit={handleSetupSubmit} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
       <div className="max-w-7xl mx-auto">
@@ -83,8 +95,8 @@ export default function Player() {
           <PlayerJoinStatus
             joined={joined}
             playerInfo={playerInfo}
-            testPlayerName={TEST_PLAYER_NAME}
-            testGroupName={TEST_GROUP_NAME}
+            testPlayerName={playerName}
+            testGroupName={groupName}
           />
         </div>
 
