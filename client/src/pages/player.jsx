@@ -99,6 +99,19 @@ export default function Player() {
             handleGroupControlUpdate(data);
             break;
 
+          case "REFRESH_AUDIO_LIST":
+            console.log(
+              "🔄 Handling REFRESH_AUDIO_LIST - Refreshing audio files...",
+            );
+            // Wait a bit for S3 to finalize uploads
+            setTimeout(() => {
+              if (playerName) {
+                console.log(`🎵 Re-fetching audio for: ${playerName}`);
+                fetchAudiosForPlayer(playerName);
+              }
+            }, 2000); // 2 second delay
+            break;
+
           case "PLAYER_JOINED_GROUP":
             console.log("Player joined group:", data.playerName);
             break;
