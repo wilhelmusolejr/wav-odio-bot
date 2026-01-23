@@ -11,6 +11,13 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { spawn } from "child_process";
+import { readdir, readFile, unlink } from "fs/promises";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 dotenv.config();
 
@@ -522,29 +529,62 @@ async function archivePlayerAudios(username) {
 
 async function triggerAudioGenerator(groupName, playerNames) {
   console.log(`\n🎙️ Step 2: Triggering audio generator...`);
-  console.log(`   🐍 [SIMULATION] Running Python audio generator...`);
+  console.log(`   🐍 Running Python audio generator...`);
 
-  return new Promise((resolve) => {
-    // Simulate Python script execution
-    setTimeout(() => {
+  return new Promise((resolve, reject) => {
+    // Build accounts configuration for Python script
+    const accounts = playerNames.map((playerName) => ({
+      username: playerName,
+      audios: 1, // Generate 1 audio file per player
+    }));
+
+    const accountsJson = JSON.stringify(accounts);
+
+    console.log(`   📝 Configuration:`);
+    accounts.forEach((acc, index) => {
       console.log(
-        `   🔊 [SIMULATION] Generating audios for group ${groupName}...`,
+        `      Player ${index + 1}: ${acc.username} (${acc.audios} audio(s))`,
       );
+    });
 
-      playerNames.forEach((playerName, index) => {
-        console.log(`   📝 [SIMULATION] Player ${index + 1}: ${playerName}`);
-        console.log(`      - Generating greeting audio...`);
-        console.log(`      - Generating strategy audio...`);
-        console.log(`      - Generating round start audio...`);
-      });
+    // Spawn Python process (spawn already imported at top)
+    // Set UTF-8 encoding to handle emoji in output
+    const pythonProcess = spawn("python", ["../audio/main.py", accountsJson], {
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+    });
 
-      console.log(`   ✅ [SIMULATION] Audio generation complete!`);
-      console.log(
-        `   📂 [SIMULATION] Generated files saved to local temp directory`,
-      );
+    let outputData = "";
+    let errorData = "";
 
-      resolve();
-    }, 2000); // Simulate 2 second generation time
+    pythonProcess.stdout.on("data", (data) => {
+      const output = data.toString();
+      outputData += output;
+      console.log(`   🐍 ${output.trim()}`);
+    });
+
+    pythonProcess.stderr.on("data", (data) => {
+      const error = data.toString();
+      errorData += error;
+      console.error(`   ❌ Python Error: ${error.trim()}`);
+    });
+
+    pythonProcess.on("close", (code) => {
+      if (code === 0) {
+        console.log(`   ✅ Audio generation complete!`);
+        console.log(`   📂 Generated files saved to audio/output/`);
+        resolve();
+      } else {
+        console.error(`   ❌ Python process exited with code ${code}`);
+        reject(
+          new Error(`Python process failed with code ${code}\n${errorData}`),
+        );
+      }
+    });
+
+    pythonProcess.on("error", (error) => {
+      console.error(`   ❌ Failed to start Python process:`, error.message);
+      reject(error);
+    });
   });
 
   /* ACTUAL IMPLEMENTATION (commented out for simulation):
@@ -573,69 +613,52 @@ async function triggerAudioGenerator(groupName, playerNames) {
 
 async function uploadNewAudios(username) {
   console.log(`\n☁️ Step 3: Uploading new audios for ${username}...`);
-  console.log(`   📤 [SIMULATION] Uploading generated audio files to S3...`);
 
-  // Simulate uploading 3 audio files
-  const simulatedFiles = [
-    `${username}_greeting_${Date.now()}.wav`,
-    `${username}_strategy_${Date.now()}.wav`,
-    `${username}_round_start_${Date.now()}.wav`,
-  ];
-
-  for (const fileName of simulatedFiles) {
-    const s3Key = `audios/current/${username}/${fileName}`;
-
-    console.log(`   📁 [SIMULATION] Uploading: ${fileName}`);
-    console.log(`      → S3 Path: ${s3Key}`);
-
-    // Simulate upload delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    console.log(`   ✅ [SIMULATION] Uploaded: ${fileName}`);
-  }
-
-  console.log(`   🗑️ [SIMULATION] Deleting local temp files...`);
-  simulatedFiles.forEach((file) => {
-    console.log(`      - Deleted: temp/${file}`);
-  });
-
-  console.log(`   ✅ Upload complete for ${username}`);
-
-  /* ACTUAL IMPLEMENTATION (commented out for simulation):
-  const fs = require('fs').promises;
-  const path = require('path');
-  const tempDir = path.join(__dirname, 'temp', username);
+  const outputDir = join(__dirname, "..", "audio", "output", username);
 
   try {
-    const files = await fs.readdir(tempDir);
-    const audioFiles = files.filter(f => f.endsWith('.mp3') || f.endsWith('.wav'));
+    // Read all files from the output directory
+    const files = await readdir(outputDir);
+    const audioFiles = files.filter(
+      (f) => f.endsWith(".mp3") || f.endsWith(".wav"),
+    );
+
+    if (audioFiles.length === 0) {
+      console.log(`   ⚠️ No audio files found in ${outputDir}`);
+      return;
+    }
+
+    console.log(`   📁 Found ${audioFiles.length} audio file(s) to upload`);
 
     for (const file of audioFiles) {
-      const filePath = path.join(tempDir, file);
-      const fileContent = await fs.readFile(filePath);
+      const filePath = join(outputDir, file);
+      const fileContent = await readFile(filePath);
       const s3Key = `audios/current/${username}/${file}`;
 
+      // Upload to S3
       const uploadCommand = new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: s3Key,
         Body: fileContent,
-        ContentType: file.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+        ContentType: file.endsWith(".mp3") ? "audio/mpeg" : "audio/wav",
       });
 
       await s3.send(uploadCommand);
       console.log(`   ✅ Uploaded: ${file} → ${s3Key}`);
 
-      // Delete local file after upload
-      await fs.unlink(filePath);
+      // Delete local file after successful upload
+      await unlink(filePath);
       console.log(`   🗑️ Deleted local: ${filePath}`);
     }
 
     console.log(`   ✅ Upload complete for ${username}`);
   } catch (error) {
-    console.error(`   ❌ Error uploading audios for ${username}:`, error.message);
+    console.error(
+      `   ❌ Error uploading audios for ${username}:`,
+      error.message,
+    );
     throw error;
   }
-  */
 }
 
 /* -------------------- ROUTES -------------------- */

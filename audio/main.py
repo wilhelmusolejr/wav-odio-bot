@@ -6,6 +6,8 @@ import librosa
 import soundfile as sf
 import re
 import uuid
+import json
+import sys
 from datetime import datetime
 from multiprocessing import Process
 
@@ -14,6 +16,49 @@ from multiprocessing import Process
 # ==========================
 BACKGROUND_NOISES = ["fan", "white_noise", "none"]
 AUDIOS_TO_GENERATE = 1
+
+accounts = [
+  {
+    "username": "botfrag666",
+    "voice_type": "real_brendan666",
+    "noises": "none"
+  },
+  {
+    "username": "jeroam",
+    "voice_type": "ai_kael",
+    "noises": "white_noise"
+  },
+  {
+    "username": "echogreg",
+    "voice_type": "real_brendan666",
+    "noises": "fan"
+  },
+  {
+    "username": "jennyhums30",
+    "voice_type": "",
+    "noises": "none"
+  },
+  {
+    "username": "elooo2092",
+    "voice_type": "real_brendan666",
+    "noises": "white_noise"
+  },
+  {
+    "username": "g3ooorge",
+    "voice_type": "",
+    "noises": "white_noise"
+  },
+  {
+    "username": "koooooalaid",
+    "voice_type": "real_brendan666",
+    "noises": "none"
+  },
+  {
+    "username": "totoyoymonaxia",
+    "voice_type": "ai_kael",
+    "noises": "fan"
+  }
+]
 
 CONFIG = [
     {
@@ -274,6 +319,50 @@ def run_bg_noise_job(username, voice_type, bg_noise, audios_to_add):
 
 if __name__ == "__main__":
     processes = []
+    
+    # Check if command line arguments are provided
+    if len(sys.argv) > 1:
+        # Parse JSON argument from command line
+        try:
+            accounts_json = sys.argv[1]
+            incoming_config = json.loads(accounts_json)
+            print(f"\n📥 Received configuration for {len(incoming_config)} account(s)")
+            
+            # Merge incoming config with existing accounts configuration
+            CONFIG = []
+            for incoming in incoming_config:
+                username = incoming["username"]
+                audios = incoming.get("audios", 1)
+                
+                # Find matching account in existing accounts list
+                account_data = next((acc for acc in accounts if acc["username"] == username), None)
+                
+                if account_data:
+                    # Use existing configuration for voice_type and noises
+                    CONFIG.append({
+                        "username": username,
+                        "voice_type": account_data["voice_type"],
+                        "noises": account_data["noises"],
+                        "audios": audios
+                    })
+                    print(f"   ✅ {username}: {account_data['voice_type']}, {account_data['noises']} noise, {audios} audio(s)")
+                else:
+                    # Use defaults if account not found
+                    print(f"   ⚠️ {username}: Not found in accounts, using defaults")
+                    CONFIG.append({
+                        "username": username,
+                        "voice_type": "real_brendan666",
+                        "noises": "none",
+                        "audios": audios
+                    })
+                    
+        except json.JSONDecodeError as e:
+            print(f"❌ Error parsing JSON argument: {e}")
+            print("Expected format: '[{\"username\": \"player1\", \"audios\": 1}]'")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Unexpected error: {e}")
+            sys.exit(1)
 
     for config in CONFIG:
         username = config["username"]
@@ -297,4 +386,4 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
 
-    print("\nAll audio generation jobs completed.")
+    print("\n✅ All audio generation jobs completed.")
