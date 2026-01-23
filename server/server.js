@@ -3,58 +3,21 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import cors from "cors";
 import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { spawn } from "child_process";
 import {
   S3Client,
-  PutObjectCommand,
   ListObjectsV2Command,
   CopyObjectCommand,
   DeleteObjectCommand,
+  PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { createReadStream } from "fs";
+import { spawn } from "child_process";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const AUDIO_BASE_PATH = path.join(__dirname, "../audio/output");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-/* -------------------- MIDDLEWARE -------------------- */
-app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"] }));
-app.use(express.json());
-
-app.use(
-  "/audio",
-  (req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Cross-Origin-Resource-Policy", "cross-origin");
-    next();
-  },
-  express.static(AUDIO_BASE_PATH),
-);
-
-/* -------------------- SERVER -------------------- */
-const server = createServer(app);
-const wss = new WebSocketServer({
-  server,
-  path: "/ws",
-  verifyClient: (info) => {
-    return true;
-  },
-});
-
-/* -------------------- STATE -------------------- */
-const clients = new Map();
-const groups = new Map();
-let clientIdCounter = 0;
-
-/* -------------------- S3 CLIENT -------------------- */
+/* -------------------- AWS S3 SETUP -------------------- */
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -63,14 +26,289 @@ const s3 = new S3Client({
   },
 });
 
-const BUCKET_NAME = "bucket-kita-laham";
+const BUCKET_NAME = process.env.AWS_BUCKET_NAME;
 
-/* -------------------- S3 HELPERS -------------------- */
+/* -------------------- MIDDLEWARE -------------------- */
+app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"] }));
+app.use(express.json());
 
-// 📊 Get audio count AND file details from S3
-async function getS3AudioDetails(username) {
+/* -------------------- SERVER -------------------- */
+const server = createServer(app);
+const wss = new WebSocketServer({
+  server,
+  path: "/ws",
+});
+
+/* -------------------- STATE -------------------- */
+const clients = new Map();
+const groups = new Map();
+const groupFinishedPlayers = new Map(); // Track finished players per group
+let clientIdCounter = 0;
+
+/* -------------------- WEBSOCKET -------------------- */
+wss.on("connection", (ws, req) => {
+  const clientId = `client-${++clientIdCounter}`;
+  const clientIP = req.socket.remoteAddress;
+
+  ws.clientId = clientId;
+  ws.role = null;
+  ws.playerName = null;
+  ws.groupName = null;
+
+  clients.set(clientId, ws);
+  console.log(`✅ [Connected] ${clientId} from ${clientIP}`);
+
+  ws.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw);
+      console.log(`📨 [${clientId}] Received: ${msg.type}`);
+
+      switch (msg.type) {
+        case "PING":
+          ws.send(JSON.stringify({ type: "PONG" }));
+          break;
+
+        case "JOIN_MASTER":
+          ws.role = "master";
+          console.log(`🎛️ ${clientId} is now a MASTER`);
+
+          // Send initial groups
+          ws.send(
+            JSON.stringify({
+              type: "INITIAL_GROUPS",
+              groups: Array.from(groups.values()),
+            }),
+          );
+          break;
+
+        case "JOIN_PLAYER": {
+          const { playerName, groupName } = msg;
+          ws.role = "player";
+          ws.playerName = playerName;
+          ws.groupName = groupName;
+
+          console.log(`👤 Player joining: ${playerName} → Group: ${groupName}`);
+
+          // Create group if doesn't exist
+          if (!groups.has(groupName)) {
+            groups.set(groupName, {
+              name: groupName,
+              players: [],
+            });
+            console.log(`🆕 Created new group: ${groupName}`);
+          }
+
+          // Add player to group
+          const group = groups.get(groupName);
+          group.players.push({
+            clientId: clientId,
+            name: playerName,
+          });
+
+          console.log(`✅ ${playerName} joined group ${groupName}`);
+          console.log(
+            `📊 Group ${groupName} now has ${group.players.length} players`,
+          );
+
+          // Send success to player
+          ws.send(
+            JSON.stringify({
+              type: "JOIN_SUCCESS",
+              clientId: clientId,
+              playerName: playerName,
+              groupName: groupName,
+              playersInGroup: group.players.length,
+            }),
+          );
+
+          // Broadcast group update to all masters
+          broadcastToMasters({
+            type: "GROUPS_UPDATE",
+            groups: Array.from(groups.values()),
+          });
+          break;
+        }
+
+        case "PLAY_AUDIO": {
+          const { groupName } = msg;
+          console.log(
+            `\n🎵 PLAY_AUDIO command received for group: ${groupName}`,
+          );
+
+          const group = groups.get(groupName);
+          if (!group) {
+            console.error(`❌ Group not found: ${groupName}`);
+            return;
+          }
+
+          // Step 1 & 2: Assign audio to each player in the group
+          assignAudioToPlayers(group).then(() => {
+            // Step 4: After audio is loaded, send play command
+            console.log(
+              `\n▶️ Step 4: Sending START_PLAYBACK to group ${groupName}`,
+            );
+
+            wss.clients.forEach((client) => {
+              if (
+                client.role === "player" &&
+                client.groupName === groupName &&
+                client.readyState === WebSocket.OPEN
+              ) {
+                client.send(
+                  JSON.stringify({
+                    type: "START_PLAYBACK",
+                  }),
+                );
+                console.log(`  ▶️ Sent START_PLAYBACK to ${client.playerName}`);
+              }
+            });
+          });
+          break;
+        }
+
+        case "AUDIO_FINISHED": {
+          const { playerName, groupName } = msg;
+          console.log(
+            `✅ ${playerName} finished playing audio in ${groupName}`,
+          );
+
+          // Broadcast to all masters
+          broadcastToMasters({
+            type: "AUDIO_FINISHED",
+            playerName: playerName,
+            groupName: groupName,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Track finished players
+          if (!groupFinishedPlayers.has(groupName)) {
+            groupFinishedPlayers.set(groupName, new Set());
+          }
+          groupFinishedPlayers.get(groupName).add(playerName);
+
+          // Check if all players in group have finished
+          const group = groups.get(groupName);
+          if (group) {
+            const finishedPlayers = groupFinishedPlayers.get(groupName);
+            const allFinished = group.players.every((player) =>
+              finishedPlayers.has(player.name),
+            );
+
+            if (allFinished) {
+              console.log(
+                `\n🎉 All players in group ${groupName} have finished!`,
+              );
+              console.log(`🔄 Starting audio regeneration workflow...\n`);
+
+              // Clear finished players for this group
+              groupFinishedPlayers.delete(groupName);
+
+              // Start the workflow
+              handleAudioRegeneration(group);
+            }
+          }
+          break;
+        }
+
+        case "PLAYER_FINISHED": {
+          const { playerName, groupName } = msg;
+          console.log(`✅ Player ${playerName} finished in group ${groupName}`);
+
+          // Forward to all masters
+          broadcastToMasters({
+            type: "PLAYER_FINISHED",
+            playerName: playerName,
+            groupName: groupName,
+          });
+
+          console.log(`📤 Forwarded PLAYER_FINISHED to all masters`);
+          break;
+        }
+
+        case "TRIGGER_REGENERATION": {
+          const { groupName, playerNames } = msg;
+          console.log(
+            `\n🔄 TRIGGER_REGENERATION received for group: ${groupName}`,
+          );
+          console.log(`   Players: ${playerNames.join(", ")}`);
+
+          executeRegenerationWorkflow(groupName, playerNames)
+            .then(() => {
+              // Notify master that regeneration is complete
+              ws.send(
+                JSON.stringify({
+                  type: "REGENERATION_COMPLETE",
+                  groupName: groupName,
+                }),
+              );
+              console.log(`✅ Sent REGENERATION_COMPLETE to master\n`);
+            })
+            .catch((error) => {
+              console.error(`❌ Regeneration failed:`, error);
+              ws.send(
+                JSON.stringify({
+                  type: "REGENERATION_ERROR",
+                  groupName: groupName,
+                  error: error.message,
+                }),
+              );
+            });
+          break;
+        }
+
+        default:
+          console.log(`⚠️ Unknown message type: ${msg.type}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error parsing message:`, error.message);
+    }
+  });
+
+  ws.on("close", () => {
+    // Remove player from group
+    if (ws.role === "player" && ws.groupName && groups.has(ws.groupName)) {
+      const group = groups.get(ws.groupName);
+      group.players = group.players.filter((p) => p.clientId !== clientId);
+
+      console.log(`👋 ${ws.playerName} left group ${ws.groupName}`);
+
+      // Delete group if empty
+      if (group.players.length === 0) {
+        groups.delete(ws.groupName);
+        console.log(`🗑️ Deleted empty group: ${ws.groupName}`);
+      } else {
+        // Broadcast update
+        broadcastToMasters({
+          type: "GROUPS_UPDATE",
+          groups: Array.from(groups.values()),
+        });
+      }
+    }
+
+    clients.delete(clientId);
+    console.log(`🔌 [Disconnected] ${clientId}`);
+  });
+
+  ws.on("error", (error) => {
+    console.error(`❌ [Error] ${clientId}:`, error.message);
+  });
+});
+
+/* -------------------- HELPER FUNCTIONS -------------------- */
+
+// Broadcast to all masters
+function broadcastToMasters(payload) {
+  wss.clients.forEach((client) => {
+    if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(payload));
+    }
+  });
+}
+
+// 🆕 Get audio files from S3 for a specific user
+async function getAudioFilesFromS3(username) {
   try {
-    console.log(`🔍 Checking S3 audio for: ${username}`);
+    console.log(`🔍 Fetching audio files for: ${username}`);
 
     const command = new ListObjectsV2Command({
       Bucket: BUCKET_NAME,
@@ -78,669 +316,340 @@ async function getS3AudioDetails(username) {
     });
 
     const response = await s3.send(command);
-    const audioFiles = (response.Contents || [])
-      .filter((obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav"))
-      .map((obj) => ({
-        filename: obj.Key.split("/").pop(),
-        s3Key: obj.Key,
-        s3Url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
-        size: obj.Size,
-        lastModified: obj.LastModified,
-      }));
 
-    console.log(`📊 ${username} has ${audioFiles.length} audio files in S3`);
-    return { count: audioFiles.length, files: audioFiles };
+    if (!response.Contents || response.Contents.length === 0) {
+      console.warn(`⚠️ No audio files found for ${username}`);
+      return [];
+    }
+
+    // Filter only audio files and create URLs
+    const audioFiles = response.Contents.filter(
+      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav"),
+    ).map((obj, index) => ({
+      id: index + 1,
+      name: obj.Key.split("/").pop(), // Get filename
+      url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
+    }));
+
+    console.log(`✅ Found ${audioFiles.length} audio files for ${username}`);
+    return audioFiles;
   } catch (error) {
-    console.error(`❌ Error checking S3 for ${username}:`, error.message);
-    return { count: 0, files: [] };
+    console.error(`❌ Error fetching audio from S3:`, error.message);
+    return [];
   }
 }
 
-// 📊 Check audio balance with file details
-async function checkGroupAudioBalance(group) {
-  console.log(`\n📋 Checking audio balance for group: ${group.name}`);
-
-  const audioCounts = await Promise.all(
-    group.users.map(async (user) => {
-      const details = await getS3AudioDetails(user.name);
-      return {
-        username: user.name,
-        count: details.count,
-        files: details.files, // ✅ Include file details
-      };
-    }),
-  );
-
-  const maxCount = Math.max(...audioCounts.map((u) => u.count), 0);
-  const playersNeedingAudio = audioCounts.filter((u) => u.count < maxCount);
-
-  console.log(`\n📊 Audio Balance Report:`);
-  audioCounts.forEach(({ username, count, files }) => {
-    const status = count < maxCount ? "⚠️ NEEDS AUDIO" : "✅ OK";
-    console.log(`   ${status} ${username}: ${count} files`);
-
-    // ✅ Log first 3 filenames as preview
-    if (files.length > 0) {
-      const preview = files
-        .slice(0, 3)
-        .map((f) => f.filename)
-        .join(", ");
-      console.log(`      Files: ${preview}${files.length > 3 ? "..." : ""}`);
-    }
-  });
-  console.log(`   Max count: ${maxCount}`);
-  console.log(`   Players needing audio: ${playersNeedingAudio.length}\n`);
-
-  return { audioCounts, maxCount, playersNeedingAudio };
-}
-
-// 📤 Upload single file to S3
-async function uploadToS3(filePath, key) {
-  const fileStream = createReadStream(filePath);
-
-  const command = new PutObjectCommand({
-    Bucket: BUCKET_NAME,
-    Key: key,
-    Body: fileStream,
-    ContentType: "audio/mpeg",
-  });
-
-  await s3.send(command);
-  console.log("✅ Uploaded to S3:", key);
-}
-
-// 📤 Upload entire folder to S3
-async function uploadFolderToS3(username, s3Prefix = `current/${username}/`) {
-  const localDir = path.join(AUDIO_BASE_PATH, username);
-
-  if (!fs.existsSync(localDir)) {
-    console.log(`⚠️ Local folder not found: ${localDir}`);
-    return;
-  }
-
-  const files = fs.readdirSync(localDir);
-  console.log(`📤 Uploading ${files.length} files for ${username} to S3...`);
-
-  for (const file of files) {
-    const fullPath = path.join(localDir, file);
-    if (fs.statSync(fullPath).isFile()) {
-      await uploadToS3(fullPath, `${s3Prefix}${file}`);
-    }
-  }
-
-  console.log(`✅ All files uploaded for ${username}`);
-}
-
-// 📦 Archive S3 files (move current → archived with timestamp)
-async function archiveS3Audio(username) {
-  try {
-    const timestamp = new Date().toISOString().replace(/:/g, "-").split(".")[0];
-    const currentPrefix = `current/${username}/`;
-    const archivePrefix = `archived/${username}/${timestamp}/`;
-
-    console.log(
-      `📦 Archiving ${username} from ${currentPrefix} to ${archivePrefix}`,
-    );
-
-    // List current files
-    const listCommand = new ListObjectsV2Command({
-      Bucket: BUCKET_NAME,
-      Prefix: currentPrefix,
-    });
-    const { Contents } = await s3.send(listCommand);
-
-    if (!Contents || Contents.length === 0) {
-      console.log(`⚠️ No files to archive for ${username}`);
-      return;
-    }
-
-    // Copy to archive and delete from current
-    for (const obj of Contents) {
-      const filename = obj.Key.replace(currentPrefix, "");
-
-      // Copy to archive
-      await s3.send(
-        new CopyObjectCommand({
-          Bucket: BUCKET_NAME,
-          CopySource: `${BUCKET_NAME}/${obj.Key}`,
-          Key: `${archivePrefix}${filename}`,
-        }),
-      );
-
-      // Delete from current
-      await s3.send(
-        new DeleteObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: obj.Key,
-        }),
-      );
-    }
-
-    console.log(`✅ Archived ${Contents.length} files for ${username}`);
-  } catch (error) {
-    console.error(`❌ Error archiving ${username}:`, error.message);
-  }
-}
-
-/* -------------------- AUDIO GENERATION -------------------- */
-
-// 🗑️ Delete local audio folder
-function deleteAudioFolder(playerName) {
-  const folderPath = path.join(AUDIO_BASE_PATH, playerName);
-  console.log(`🗑️ Deleting local folder: ${folderPath}`);
-
-  return new Promise((resolve, reject) => {
-    try {
-      if (fs.existsSync(folderPath)) {
-        fs.rmSync(folderPath, { recursive: true, force: true });
-        console.log(`✅ Deleted: ${folderPath}`);
-        resolve();
-      } else {
-        console.log(`⚠️ Folder doesn't exist: ${folderPath}`);
-        resolve();
-      }
-    } catch (error) {
-      console.error(`❌ Error deleting ${folderPath}:`, error);
-      reject(error);
-    }
-  });
-}
-
-// 🐍 Run Python audio generator
-function runPythonScript() {
-  return new Promise((resolve, reject) => {
-    const pythonScript = path.join(__dirname, "../audio/main.py");
-    const audioDir = path.join(__dirname, "../audio");
-
-    console.log(`🐍 Running Python script: ${pythonScript}`);
-
-    const pythonProcess = spawn("python", ["main.py"], {
-      cwd: audioDir,
-      shell: true,
-    });
-
-    pythonProcess.stdout.on("data", (data) => {
-      console.log(`[Python] ${data.toString().trim()}`);
-    });
-
-    pythonProcess.stderr.on("data", (data) => {
-      console.error(`[Python Error] ${data.toString().trim()}`);
-    });
-
-    pythonProcess.on("close", (code) => {
-      if (code === 0) {
-        console.log(`✅ Python script completed successfully`);
-        resolve();
-      } else {
-        console.error(`❌ Python script failed with exit code ${code}`);
-        reject(new Error(`Python failed: code ${code}`));
-      }
-    });
-
-    pythonProcess.on("error", (error) => {
-      console.error(`❌ Failed to start Python process:`, error);
-      reject(error);
-    });
-  });
-}
-
-// 🔄 Generate → Upload → Delete cycle
-async function generateAndUploadAudio(usernames) {
+// 🆕 Assign audio files to all players in a group
+async function assignAudioToPlayers(group) {
   console.log(
-    `\n🔄 Starting generate & upload cycle for: ${usernames.join(", ")}`,
+    `\n📤 Step 1 & 2: Assigning audio to ${group.players.length} players in group: ${group.name}`,
   );
 
-  // 1. Generate locally
-  console.log(`🐍 Step 1/3: Generating audio files...`);
-  await runPythonScript();
-
-  // 2. Upload to S3
-  console.log(`📤 Step 2/3: Uploading to S3...`);
-  for (const username of usernames) {
-    await uploadFolderToS3(username, `current/${username}/`);
-  }
-
-  // 3. Delete local files
-  console.log(`🗑️ Step 3/3: Cleaning up local files...`);
-  for (const username of usernames) {
-    await deleteAudioFolder(username);
-  }
-
-  console.log(`✅ Generate & upload cycle complete!\n`);
-}
-
-/* -------------------- OTHER HELPERS -------------------- */
-
-function broadcastToMasters(payload) {
-  wss.clients.forEach((c) => {
-    if (c.readyState === 1 && c.role === "master") {
-      c.send(JSON.stringify(payload));
-    }
-  });
-}
-
-function broadcastToGroup(groupName, payload) {
-  wss.clients.forEach((c) => {
-    if (
-      c.readyState === 1 &&
-      c.role === "player" &&
-      c.groupName === groupName
-    ) {
-      c.send(JSON.stringify(payload));
-    }
-  });
-}
-
-function generateRandomTime(minHours = 3, maxHours = 6) {
-  const now = new Date();
-  const randomHours = Math.random() * (maxHours - minHours) + minHours;
-  const futureTime = new Date(now.getTime() + randomHours * 60 * 60 * 1000);
-
-  const hours = String(futureTime.getHours()).padStart(2, "0");
-  const minutes = String(futureTime.getMinutes()).padStart(2, "0");
-
-  return `${hours}:${minutes}`;
-}
-
-/* -------------------- SESSION CYCLE -------------------- */
-
-async function handleSessionComplete(group) {
-  console.log(`\n🔄 ===== SESSION CYCLE START: ${group.name} =====`);
-
-  try {
-    // Step 1: Archive current S3 audio
-    console.log(`\n📦 Step 1/3: Archiving S3 audio...`);
-    await Promise.all(group.users.map((user) => archiveS3Audio(user.name)));
-
-    // Step 2: Generate new audio for ALL players
-    console.log(`\n🐍 Step 2/3: Generating new audio for all players...`);
-    const allUsernames = group.users.map((u) => u.name);
-    await generateAndUploadAudio(allUsernames);
-
-    // Step 3: Generate new countdown
-    console.log(`\n⏰ Step 3/3: Generating new schedule...`);
-    const newTime = generateRandomTime(3, 6);
-    console.log(`✅ New scheduled time: ${newTime}`);
-
-    // Reset and notify
-    group.users.forEach((user) => (user.hasFinishedPlaying = false));
-
-    broadcastToGroup(group.name, {
-      type: "REFRESH_AUDIO_LIST",
-      message: "New audio files generated and uploaded",
-    });
-
-    broadcastToMasters({
-      type: "SESSION_CYCLE_COMPLETE",
-      groupName: group.name,
-      newScheduledTime: newTime,
-    });
-
-    console.log(`\n✅ ===== SESSION CYCLE COMPLETE: ${group.name} =====\n`);
-  } catch (error) {
-    console.error(`\n❌ SESSION CYCLE ERROR:`, error);
-    broadcastToMasters({
-      type: "SESSION_CYCLE_ERROR",
-      groupName: group.name,
-      error: error.message,
-    });
-  }
-}
-
-/* -------------------- WEBSOCKET -------------------- */
-wss.on("connection", (ws, req) => {
-  const clientId = `client-${++clientIdCounter}`;
-  const clientIP = req.socket.remoteAddress;
-  ws.clientId = clientId;
-  ws.role = null;
-  ws.groupName = null;
-  ws.playerName = null;
-
-  clients.set(clientId, ws);
-  console.log(`[Connected] ${clientId} from ${clientIP}`);
-
-  ws.on("message", (raw) => {
-    const msg = JSON.parse(raw);
-
-    switch (msg.type) {
-      case "MASTER_JOIN": {
-        ws.role = "master";
-        ws.send(
-          JSON.stringify({
-            type: "INITIAL_GROUPS",
-            groups: Array.from(groups.values()),
-          }),
-        );
-        break;
-      }
-
-      case "PLAYER_JOIN": {
-        const { playerName, groupName, rdpName } = msg;
-
-        ws.role = "player";
-        ws.playerName = playerName;
-        ws.groupName = groupName;
-
-        if (!groups.has(groupName)) {
-          groups.set(groupName, {
-            name: groupName,
-            rdpName,
-            users: [],
-          });
-        }
-
-        const group = groups.get(groupName);
-        group.users.push({
-          id: clientId,
-          name: playerName,
-          hasFinishedPlaying: false,
-        });
-
-        ws.send(
-          JSON.stringify({
-            type: "PLAYER_JOINED",
-            clientId,
-            groupName,
-            playerName,
-            rdpName,
-          }),
-        );
-
-        broadcastToMasters({
-          type: "UPDATE_GROUPS",
-          groups: Array.from(groups.values()),
-        });
-        break;
-      }
-
-      case "UPDATE_GROUP_CONTROL": {
-        const { groupName, control } = msg;
-        const group = groups.get(groupName);
-        if (!group) return;
-
-        if (control.isPlaying === true) {
-          group.users.forEach((u) => (u.hasFinishedPlaying = false));
-        }
-
-        broadcastToGroup(groupName, {
-          type: "GROUP_CONTROL_UPDATE",
-          control,
-        });
-        break;
-      }
-
-      case "PLAYER_FINISHED_PLAYING": {
-        console.log(`📩 Player finished playing message received`);
-        const group = groups.get(ws.groupName);
-        if (!group) {
-          console.log(`⚠️ Group not found: ${ws.groupName}`);
-          return;
-        }
-
-        const player = group.users.find((u) => u.id === clientId);
-        if (player) {
-          player.hasFinishedPlaying = true;
-          console.log(`✅ Marked player ${player.name} as finished`);
-        }
-
-        const finishedCount = group.users.filter(
-          (u) => u.hasFinishedPlaying,
-        ).length;
-        const totalCount = group.users.length;
-        console.log(
-          `📊 Group ${group.name}: ${finishedCount}/${totalCount} finished`,
-        );
-
-        const allFinished = group.users.every((u) => u.hasFinishedPlaying);
-
-        if (allFinished) {
-          console.log(
-            `🎉 [Group Complete] ${group.name} - ALL PLAYERS FINISHED!`,
-          );
-
-          broadcastToMasters({
-            type: "GROUP_PLAYBACK_COMPLETE",
-            groupName: group.name,
-          });
-
-          console.log(`🚀 Triggering session cycle for ${group.name}...`);
-          handleSessionComplete(group).catch((err) => {
-            console.error(`❌ Session cycle failed:`, err);
-          });
-        }
-        break;
-      }
-
-      // 🆕 Test endpoint to check audio balance
-      case "CHECK_AUDIO_BALANCE": {
-        const { groupName } = msg;
-        const group = groups.get(groupName);
-
-        if (!group) {
-          ws.send(
-            JSON.stringify({
-              type: "ERROR",
-              message: `Group not found: ${groupName}`,
-            }),
-          );
-          return;
-        }
-
-        console.log(
-          `\n🔍 Manual audio balance check requested for: ${groupName}`,
-        );
-        checkGroupAudioBalance(group)
-          .then(async (result) => {
-            // Send balance result to master
-            ws.send(
-              JSON.stringify({
-                type: "AUDIO_BALANCE_RESULT",
-                groupName,
-                result,
-              }),
-            );
-
-            // 🆕 Now assign audio to players for testing
-            console.log(`\n📤 Assigning audio to players in ${groupName}...`);
-            await assignAudioToGroup(group);
-          })
-          .catch((err) => {
-            console.error(`❌ Error checking balance:`, err);
-            ws.send(
-              JSON.stringify({
-                type: "ERROR",
-                message: err.message,
-              }),
-            );
-          });
-        break;
-      }
-
-      case "PING":
-        ws.send(JSON.stringify({ type: "PONG" }));
-        break;
-
-      case "ASSIGN_GROUP_AUDIO": {
-        const { groupName } = msg;
-        console.log(`\n🎵 Assigning audio for group: ${groupName}`);
-
-        const group = groups.get(groupName);
-        if (!group) {
-          console.error(`❌ Group not found: ${groupName}`);
-          return;
-        }
-
-        // Assign audio to each player in the group
-        assignAudioToGroup(group).catch((err) => {
-          console.error(`❌ Error assigning audio:`, err);
-          ws.send(
-            JSON.stringify({
-              type: "ERROR",
-              message: `Failed to assign audio: ${err.message}`,
-            }),
-          );
-        });
-        break;
-      }
-
-      case "READY_TO_PLAY": {
-        const { playerName, groupName } = msg;
-        console.log(`✅ Player ${playerName} is ready to play`);
-
-        const group = groups.get(groupName);
-        if (!group) return;
-
-        // Mark player as ready
-        const player = group.users.find((u) => u.name === playerName);
-        if (player) {
-          player.isReady = true;
-        }
-
-        // Check if all players are ready
-        const allReady = group.users.every((u) => u.isReady);
-        const readyCount = group.users.filter((u) => u.isReady).length;
-
-        console.log(
-          `📊 Group ${groupName}: ${readyCount}/${group.users.length} players ready`,
-        );
-
-        if (allReady) {
-          console.log(`🎉 All players in ${groupName} are ready!`);
-
-          // Notify master that all players are ready
-          broadcastToMasters({
-            type: "ALL_PLAYERS_READY",
-            groupName: groupName,
-          });
-
-          // Reset ready states for next cycle
-          setTimeout(() => {
-            group.users.forEach((u) => (u.isReady = false));
-          }, 1000);
-        }
-        break;
-      }
-
-      case "START_GROUP_PLAYBACK": {
-        const { groupName } = msg;
-        console.log(`\n▶️ START_GROUP_PLAYBACK request for: ${groupName}`);
-
-        const group = groups.get(groupName);
-        if (!group) {
-          console.error(`❌ Group not found: ${groupName}`);
-          return;
-        }
-
-        // Send play command to all players in the group
-        broadcastToGroup(groupName, {
-          type: "START_PLAYBACK",
-        });
-
-        console.log(`✅ Sent START_PLAYBACK to all players in ${groupName}`);
-        break;
-      }
-
-      default:
-        console.log("[Unknown message]", msg.type);
-    }
-  });
-
-  ws.on("close", () => {
-    const wsData = clients.get(clientId);
-    if (!wsData) return;
-
-    if (wsData.role === "player") {
-      const group = groups.get(wsData.groupName);
-      if (group) {
-        group.users = group.users.filter((u) => u.id !== clientId);
-        if (group.users.length === 0) groups.delete(wsData.groupName);
-      }
-    }
-
-    clients.delete(clientId);
-    broadcastToMasters({
-      type: "UPDATE_GROUPS",
-      groups: Array.from(groups.values()),
-    });
-    console.log(`[Disconnected] ${clientId}`);
-  });
-});
-
-/* -------------------- AUDIO ASSIGNMENT -------------------- */
-
-// Assign audio files from S3 to all players in a group
-async function assignAudioToGroup(group) {
-  console.log(`\n🔄 Starting audio assignment for group: ${group.name}`);
-
-  try {
-    // Get audio details for each player
-    for (const user of group.users) {
-      const audioDetails = await getS3AudioDetails(user.name);
-
-      if (audioDetails.count === 0) {
-        console.warn(`⚠️ No audio files found for ${user.name}`);
-        continue;
-      }
-
-      console.log(`📤 Assigning ${audioDetails.count} files to ${user.name}`);
-
-      // Find the player's WebSocket connection
+  for (const player of group.players) {
+    try {
+      // Find player's WebSocket
       const playerWs = Array.from(wss.clients).find(
         (client) =>
           client.role === "player" &&
-          client.playerName === user.name &&
-          client.groupName === group.name,
+          client.clientId === player.clientId &&
+          client.readyState === WebSocket.OPEN,
       );
 
-      if (!playerWs || playerWs.readyState !== WebSocket.OPEN) {
-        console.warn(`⚠️ Player ${user.name} not connected`);
+      if (!playerWs) {
+        console.warn(`⚠️ Player ${player.name} not connected`);
         continue;
       }
 
-      // Send audio files to player
+      // Step 1: Get audio files from S3 for this player
+      const audioFiles = await getAudioFilesFromS3(player.name);
+
+      if (audioFiles.length === 0) {
+        console.warn(`⚠️ No audio files for ${player.name}, skipping...`);
+        continue;
+      }
+
+      // Step 2: Send audio files directly to player
       playerWs.send(
         JSON.stringify({
-          type: "ASSIGN_AUDIO",
-          audioFiles: audioDetails.files,
+          type: "LOAD_AUDIO",
+          audioFiles: audioFiles,
         }),
       );
 
-      console.log(`✅ Sent ${audioDetails.count} audio files to ${user.name}`);
+      console.log(
+        `✅ Step 2: Sent ${audioFiles.length} audio files to ${player.name}`,
+      );
+
+      // Wait a bit for player to receive
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    } catch (error) {
+      console.error(
+        `❌ Error assigning audio to ${player.name}:`,
+        error.message,
+      );
+    }
+  }
+
+  console.log(
+    `\n✅ Step 2 Complete: Audio sent to all players in ${group.name}`,
+  );
+  console.log(`⏳ Step 3: Waiting 2 seconds for players to load audio...\n`);
+
+  // Wait for all players to load audio
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+}
+
+// 🆕 Execute the complete regeneration workflow
+async function executeRegenerationWorkflow(groupName, playerNames) {
+  console.log(`\n${"═".repeat(47)}`);
+  console.log(`🔄 AUDIO REGENERATION WORKFLOW STARTED`);
+  console.log(`   Group: ${groupName}`);
+  console.log(`   Players: ${playerNames.join(", ")}`);
+  console.log(`${"═".repeat(47)}\n`);
+
+  try {
+    // Step 1: Archive audios for all players
+    for (const playerName of playerNames) {
+      await archivePlayerAudios(playerName);
     }
 
-    console.log(`✅ Audio assignment complete for group: ${group.name}\n`);
+    // Step 2: Trigger audio generator
+    await triggerAudioGenerator(groupName, playerNames);
+
+    // Step 3: Upload new audios for all players
+    for (const playerName of playerNames) {
+      await uploadNewAudios(playerName);
+    }
+
+    console.log(
+      `\n✅ Audio regeneration workflow completed for group ${groupName}!\n`,
+    );
   } catch (error) {
-    console.error(`❌ Error in assignAudioToGroup:`, error);
+    console.error(`\n❌ Regeneration workflow failed:`, error);
     throw error;
   }
 }
 
-/* -------------------- AUDIO API -------------------- */
-function getPlayerAudios(playerName) {
-  const dir = path.join(AUDIO_BASE_PATH, playerName);
-  if (!fs.existsSync(dir)) return [];
+/* -------------------- AUDIO REGENERATION WORKFLOW -------------------- */
 
-  return fs.readdirSync(dir).map((file) => ({
-    id: file,
-    name: file.replace(/\.[^/.]+$/, ""),
-    url: `/audio/${playerName}/${file}`,
-    duration: 180,
-  }));
+async function handleAudioRegeneration(group) {
+  console.log(`\n═══════════════════════════════════════════════`);
+  console.log(`🔄 AUDIO REGENERATION WORKFLOW STARTED`);
+  console.log(`   Group: ${group.name}`);
+  console.log(`   Players: ${group.players.map((p) => p.name).join(", ")}`);
+  console.log(`═══════════════════════════════════════════════\n`);
+
+  try {
+    // Step 1: Archive current audios for all players
+    for (const player of group.players) {
+      await archivePlayerAudios(player.name);
+    }
+
+    // Step 2: Trigger Python audio generator (simulation)
+    await triggerAudioGenerator(group);
+
+    // Step 3: Upload new audios (simulation)
+    for (const player of group.players) {
+      await uploadNewAudios(player.name);
+    }
+
+    console.log(
+      `\n✅ Audio regeneration workflow completed for group ${group.name}!\n`,
+    );
+  } catch (error) {
+    console.error(`❌ Error in audio regeneration workflow:`, error.message);
+  }
 }
 
-app.get("/api/audios/:playerName", (req, res) => {
+async function archivePlayerAudios(username) {
+  console.log(`\n📦 Step 1: Archiving audios for ${username}...`);
+
+  try {
+    // List all current audio files
+    const listCommand = new ListObjectsV2Command({
+      Bucket: BUCKET_NAME,
+      Prefix: `audios/current/${username}/`,
+    });
+
+    const response = await s3.send(listCommand);
+
+    if (!response.Contents || response.Contents.length === 0) {
+      console.log(`   ⚠️ No audio files found for ${username}`);
+      return;
+    }
+
+    const audioFiles = response.Contents.filter(
+      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav"),
+    );
+
+    console.log(`   📁 Found ${audioFiles.length} audio files to archive`);
+
+    // Copy each file to archive
+    for (const file of audioFiles) {
+      const fileName = file.Key.split("/").pop();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const archiveKey = `audios/archive/${username}/${timestamp}_${fileName}`;
+
+      // Copy to archive
+      const copyCommand = new CopyObjectCommand({
+        Bucket: BUCKET_NAME,
+        CopySource: `${BUCKET_NAME}/${file.Key}`,
+        Key: archiveKey,
+      });
+
+      await s3.send(copyCommand);
+      console.log(`   ✅ Archived: ${fileName} → ${archiveKey}`);
+
+      // Delete from current
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: file.Key,
+      });
+
+      await s3.send(deleteCommand);
+      console.log(`   🗑️ Deleted from current: ${file.Key}`);
+    }
+
+    console.log(`   ✅ Archiving complete for ${username}`);
+  } catch (error) {
+    console.error(
+      `   ❌ Error archiving audios for ${username}:`,
+      error.message,
+    );
+    throw error;
+  }
+}
+
+async function triggerAudioGenerator(groupName, playerNames) {
+  console.log(`\n🎙️ Step 2: Triggering audio generator...`);
+  console.log(`   🐍 [SIMULATION] Running Python audio generator...`);
+
+  return new Promise((resolve) => {
+    // Simulate Python script execution
+    setTimeout(() => {
+      console.log(
+        `   🔊 [SIMULATION] Generating audios for group ${groupName}...`,
+      );
+
+      playerNames.forEach((playerName, index) => {
+        console.log(`   📝 [SIMULATION] Player ${index + 1}: ${playerName}`);
+        console.log(`      - Generating greeting audio...`);
+        console.log(`      - Generating strategy audio...`);
+        console.log(`      - Generating round start audio...`);
+      });
+
+      console.log(`   ✅ [SIMULATION] Audio generation complete!`);
+      console.log(
+        `   📂 [SIMULATION] Generated files saved to local temp directory`,
+      );
+
+      resolve();
+    }, 2000); // Simulate 2 second generation time
+  });
+
+  /* ACTUAL IMPLEMENTATION (commented out for simulation):
+  return new Promise((resolve, reject) => {
+    const pythonScript = spawn('python', ['audio/main.py', '--group', group.name]);
+
+    pythonScript.stdout.on('data', (data) => {
+      console.log(`   🐍 ${data.toString()}`);
+    });
+
+    pythonScript.stderr.on('data', (data) => {
+      console.error(`   ❌ ${data.toString()}`);
+    });
+
+    pythonScript.on('close', (code) => {
+      if (code === 0) {
+        console.log(`   ✅ Python audio generator finished successfully`);
+        resolve();
+      } else {
+        reject(new Error(`Python script exited with code ${code}`));
+      }
+    });
+  });
+  */
+}
+
+async function uploadNewAudios(username) {
+  console.log(`\n☁️ Step 3: Uploading new audios for ${username}...`);
+  console.log(`   📤 [SIMULATION] Uploading generated audio files to S3...`);
+
+  // Simulate uploading 3 audio files
+  const simulatedFiles = [
+    `${username}_greeting_${Date.now()}.wav`,
+    `${username}_strategy_${Date.now()}.wav`,
+    `${username}_round_start_${Date.now()}.wav`,
+  ];
+
+  for (const fileName of simulatedFiles) {
+    const s3Key = `audios/current/${username}/${fileName}`;
+
+    console.log(`   📁 [SIMULATION] Uploading: ${fileName}`);
+    console.log(`      → S3 Path: ${s3Key}`);
+
+    // Simulate upload delay
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    console.log(`   ✅ [SIMULATION] Uploaded: ${fileName}`);
+  }
+
+  console.log(`   🗑️ [SIMULATION] Deleting local temp files...`);
+  simulatedFiles.forEach((file) => {
+    console.log(`      - Deleted: temp/${file}`);
+  });
+
+  console.log(`   ✅ Upload complete for ${username}`);
+
+  /* ACTUAL IMPLEMENTATION (commented out for simulation):
+  const fs = require('fs').promises;
+  const path = require('path');
+  const tempDir = path.join(__dirname, 'temp', username);
+
+  try {
+    const files = await fs.readdir(tempDir);
+    const audioFiles = files.filter(f => f.endsWith('.mp3') || f.endsWith('.wav'));
+
+    for (const file of audioFiles) {
+      const filePath = path.join(tempDir, file);
+      const fileContent = await fs.readFile(filePath);
+      const s3Key = `audios/current/${username}/${file}`;
+
+      const uploadCommand = new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: s3Key,
+        Body: fileContent,
+        ContentType: file.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+      });
+
+      await s3.send(uploadCommand);
+      console.log(`   ✅ Uploaded: ${file} → ${s3Key}`);
+
+      // Delete local file after upload
+      await fs.unlink(filePath);
+      console.log(`   🗑️ Deleted local: ${filePath}`);
+    }
+
+    console.log(`   ✅ Upload complete for ${username}`);
+  } catch (error) {
+    console.error(`   ❌ Error uploading audios for ${username}:`, error.message);
+    throw error;
+  }
+  */
+}
+
+/* -------------------- ROUTES -------------------- */
+app.get("/", (req, res) => {
   res.json({
-    audios: getPlayerAudios(req.params.playerName),
+    status: "ok",
+    message: "WebSocket server running",
+    connectedClients: clients.size,
+    totalGroups: groups.size,
   });
 });
 
-/* -------------------- ERROR HANDLING -------------------- */
-wss.on("error", (error) => {
-  console.error("❌ WebSocket Server Error:", error);
-});
-
-/* -------------------- START -------------------- */
+/* -------------------- START SERVER -------------------- */
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
-  console.log(`🔌 WebSocket server ready at ws://0.0.0.0:${PORT}/ws`);
+  console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`🔌 WebSocket ready at ws://0.0.0.0:${PORT}/ws\n`);
 });
