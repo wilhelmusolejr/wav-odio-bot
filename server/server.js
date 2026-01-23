@@ -49,10 +49,18 @@ const wss = new WebSocketServer({
 /* -------------------- STATE -------------------- */
 const clients = new Map();
 const groups = new Map();
-const groupFinishedPlayers = new Map(); // Track finished players per group
+const groupBotStatus = new Map();
+const playingGroups = new Map();
+const groupSchedules = new Map(); // 🆕 Store schedules server-side
+
 let clientIdCounter = 0;
 
-/* -------------------- WEBSOCKET -------------------- */
+// 🆕 Helper functions for scheduling
+const getInitialDelay = () => Math.floor(Math.random() * 10 * 60); // 0-10 minutes
+const getNextCycleDelay = () =>
+  Math.floor(Math.random() * (3 * 3600 - 1 * 3600) + 1 * 3600); // 1-3 hours
+
+/* -------------------- WEBSOCKET HANDLERS -------------------- */
 wss.on("connection", (ws, req) => {
   const clientId = `client-${++clientIdCounter}`;
   const clientIP = req.socket.remoteAddress;
@@ -65,241 +73,346 @@ wss.on("connection", (ws, req) => {
   clients.set(clientId, ws);
   console.log(`✅ [Connected] ${clientId} from ${clientIP}`);
 
-  ws.on("message", (raw) => {
-    try {
-      const msg = JSON.parse(raw);
-      console.log(`📨 [${clientId}] Received: ${msg.type}`);
-
-      switch (msg.type) {
-        case "PING":
-          ws.send(JSON.stringify({ type: "PONG" }));
-          break;
-
-        case "JOIN_MASTER":
-          ws.role = "master";
-          console.log(`🎛️ ${clientId} is now a MASTER`);
-
-          // Send initial groups
-          ws.send(
-            JSON.stringify({
-              type: "INITIAL_GROUPS",
-              groups: Array.from(groups.values()),
-            }),
-          );
-          break;
-
-        case "JOIN_PLAYER": {
-          const { playerName, groupName } = msg;
-          ws.role = "player";
-          ws.playerName = playerName;
-          ws.groupName = groupName;
-
-          console.log(`👤 Player joining: ${playerName} → Group: ${groupName}`);
-
-          // Create group if doesn't exist
-          if (!groups.has(groupName)) {
-            groups.set(groupName, {
-              name: groupName,
-              players: [],
-            });
-            console.log(`🆕 Created new group: ${groupName}`);
-          }
-
-          // Add player to group
-          const group = groups.get(groupName);
-          group.players.push({
-            clientId: clientId,
-            name: playerName,
-          });
-
-          console.log(`✅ ${playerName} joined group ${groupName}`);
-          console.log(
-            `📊 Group ${groupName} now has ${group.players.length} players`,
-          );
-
-          // Send success to player
-          ws.send(
-            JSON.stringify({
-              type: "JOIN_SUCCESS",
-              clientId: clientId,
-              playerName: playerName,
-              groupName: groupName,
-              playersInGroup: group.players.length,
-            }),
-          );
-
-          // Broadcast group update to all masters
-          broadcastToMasters({
-            type: "GROUPS_UPDATE",
-            groups: Array.from(groups.values()),
-          });
-          break;
-        }
-
-        case "PLAY_AUDIO": {
-          const { groupName } = msg;
-          console.log(
-            `\n🎵 PLAY_AUDIO command received for group: ${groupName}`,
-          );
-
-          const group = groups.get(groupName);
-          if (!group) {
-            console.error(`❌ Group not found: ${groupName}`);
-            return;
-          }
-
-          // Step 1 & 2: Assign audio to each player in the group
-          assignAudioToPlayers(group).then(() => {
-            // Step 4: After audio is loaded, send play command
-            console.log(
-              `\n▶️ Step 4: Sending START_PLAYBACK to group ${groupName}`,
-            );
-
-            wss.clients.forEach((client) => {
-              if (
-                client.role === "player" &&
-                client.groupName === groupName &&
-                client.readyState === WebSocket.OPEN
-              ) {
-                client.send(
-                  JSON.stringify({
-                    type: "START_PLAYBACK",
-                  }),
-                );
-                console.log(`  ▶️ Sent START_PLAYBACK to ${client.playerName}`);
-              }
-            });
-          });
-          break;
-        }
-
-        case "AUDIO_FINISHED": {
-          const { playerName, groupName } = msg;
-          console.log(
-            `✅ ${playerName} finished playing audio in ${groupName}`,
-          );
-
-          // Broadcast to all masters
-          broadcastToMasters({
-            type: "AUDIO_FINISHED",
-            playerName: playerName,
-            groupName: groupName,
-            timestamp: new Date().toISOString(),
-          });
-
-          // Track finished players
-          if (!groupFinishedPlayers.has(groupName)) {
-            groupFinishedPlayers.set(groupName, new Set());
-          }
-          groupFinishedPlayers.get(groupName).add(playerName);
-
-          // Check if all players in group have finished
-          const group = groups.get(groupName);
-          if (group) {
-            const finishedPlayers = groupFinishedPlayers.get(groupName);
-            const allFinished = group.players.every((player) =>
-              finishedPlayers.has(player.name),
-            );
-
-            if (allFinished) {
-              console.log(
-                `\n🎉 All players in group ${groupName} have finished!`,
-              );
-              console.log(
-                `📢 Waiting for master to trigger regeneration (no auto-run on server)\n`,
-              );
-
-              // Clear finished players for this group; master will coordinate regeneration
-              groupFinishedPlayers.delete(groupName);
-            }
-          }
-          break;
-        }
-
-        case "PLAYER_FINISHED": {
-          const { playerName, groupName } = msg;
-          console.log(`✅ Player ${playerName} finished in group ${groupName}`);
-
-          // Forward to all masters
-          broadcastToMasters({
-            type: "PLAYER_FINISHED",
-            playerName: playerName,
-            groupName: groupName,
-          });
-
-          console.log(`📤 Forwarded PLAYER_FINISHED to all masters`);
-          break;
-        }
-
-        case "TRIGGER_REGENERATION": {
-          const { groupName, playerNames } = msg;
-          console.log(
-            `\n🔄 TRIGGER_REGENERATION received for group: ${groupName}`,
-          );
-          console.log(`   Players: ${playerNames.join(", ")}`);
-
-          executeRegenerationWorkflow(groupName, playerNames)
-            .then(() => {
-              // Notify master that regeneration is complete
-              ws.send(
-                JSON.stringify({
-                  type: "REGENERATION_COMPLETE",
-                  groupName: groupName,
-                }),
-              );
-              console.log(`✅ Sent REGENERATION_COMPLETE to master\n`);
-            })
-            .catch((error) => {
-              console.error(`❌ Regeneration failed:`, error);
-              ws.send(
-                JSON.stringify({
-                  type: "REGENERATION_ERROR",
-                  groupName: groupName,
-                  error: error.message,
-                }),
-              );
-            });
-          break;
-        }
-
-        default:
-          console.log(`⚠️ Unknown message type: ${msg.type}`);
-      }
-    } catch (error) {
-      console.error(`❌ Error parsing message:`, error.message);
-    }
-  });
-
-  ws.on("close", () => {
-    // Remove player from group
-    if (ws.role === "player" && ws.groupName && groups.has(ws.groupName)) {
-      const group = groups.get(ws.groupName);
-      group.players = group.players.filter((p) => p.clientId !== clientId);
-
-      console.log(`👋 ${ws.playerName} left group ${ws.groupName}`);
-
-      // Delete group if empty
-      if (group.players.length === 0) {
-        groups.delete(ws.groupName);
-        console.log(`🗑️ Deleted empty group: ${ws.groupName}`);
-      }
-
-      // 🆕 Broadcast updated groups to all masters
-      broadcastToMasters({
-        type: "GROUPS_UPDATE",
-        groups: Array.from(groups.values()),
-      });
-      console.log(`📤 Sent GROUPS_UPDATE to masters (player disconnected)`);
-    }
-
-    clients.delete(clientId);
-    console.log(`🔌 [Disconnected] ${clientId}`);
-  });
-
+  ws.on("message", (raw) => handleMessage(ws, raw));
+  ws.on("close", () => handleDisconnect(ws));
   ws.on("error", (error) => {
-    console.error(`❌ [Error] ${clientId}:`, error.message);
+    console.error(`❌ [Error] ${ws.clientId}:`, error.message);
   });
 });
+
+function handleJoinMaster(ws) {
+  ws.role = "master";
+  console.log(`🎛️ ${ws.clientId} is now a MASTER`);
+
+  // 🆕 Send initial groups and schedules
+  const schedulesData = {};
+  groupSchedules.forEach((schedule, groupName) => {
+    schedulesData[groupName] = schedule;
+  });
+
+  ws.send(
+    JSON.stringify({
+      type: "INITIAL_GROUPS",
+      groups: Array.from(groups.values()),
+      schedules: schedulesData, // 🆕 Include schedules
+    }),
+  );
+}
+
+function handleJoinPlayer(ws, msg) {
+  const { playerName, groupName } = msg;
+  ws.role = "player";
+  ws.playerName = playerName;
+  ws.groupName = groupName;
+
+  console.log(`👤 Player joining: ${playerName} → Group: ${groupName}`);
+
+  // Create group if doesn't exist
+  if (!groups.has(groupName)) {
+    groups.set(groupName, {
+      name: groupName,
+      players: [],
+    });
+    console.log(`🆕 Created new group: ${groupName}`);
+  }
+
+  // Add player to group
+  const group = groups.get(groupName);
+  group.players.push({
+    clientId: ws.clientId,
+    name: playerName,
+  });
+
+  console.log(`✅ ${playerName} joined group ${groupName}`);
+  console.log(`📊 Group ${groupName} now has ${group.players.length} players`);
+
+  // Send success to player
+  ws.send(
+    JSON.stringify({
+      type: "JOIN_SUCCESS",
+      clientId: ws.clientId,
+      playerName: playerName,
+      groupName: groupName,
+      playersInGroup: group.players.length,
+    }),
+  );
+
+  // Broadcast group update to all masters
+  broadcastToMasters({
+    type: "GROUPS_UPDATE",
+    groups: Array.from(groups.values()),
+  });
+}
+
+async function handlePlayAudio(msg) {
+  const { groupName } = msg;
+  console.log(`\n🎵 PLAY_AUDIO command received for group: ${groupName}`);
+
+  const group = groups.get(groupName);
+  if (!group) {
+    console.error(`❌ Group not found: ${groupName}`);
+    return;
+  }
+
+  // 🆕 Initialize playing group tracker
+  playingGroups.set(groupName, {
+    totalPlayers: group.players.length,
+    finishedPlayers: new Set(),
+  });
+
+  // 🆕 Update schedule status to speaking
+  if (groupSchedules.has(groupName)) {
+    const schedule = groupSchedules.get(groupName);
+    schedule.status = "speaking";
+    schedule.isPlaying = true;
+    schedule.countdown = 0;
+    broadcastScheduleUpdate();
+  }
+
+  // Update bot status to running
+  groupBotStatus.set(groupName, "running");
+  broadcastBotStatusUpdate(groupName, "running");
+  console.log(`🤖 Bot status: ${groupName} → RUNNING`);
+
+  // Assign audio and start playback
+  await assignAudioToPlayers(group);
+
+  console.log(`\n▶️ Step 4: Sending START_PLAYBACK to group ${groupName}`);
+
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "player" &&
+      client.groupName === groupName &&
+      client.readyState === WebSocket.OPEN
+    ) {
+      client.send(JSON.stringify({ type: "START_PLAYBACK" }));
+      console.log(`  ▶️ Sent START_PLAYBACK to ${client.playerName}`);
+    }
+  });
+}
+
+function handlePlayerFinished(msg) {
+  const { playerName, groupName } = msg;
+  console.log(`✅ Player ${playerName} finished in group ${groupName}`);
+
+  // 🆕 Track finished player
+  const playingGroup = playingGroups.get(groupName);
+  if (playingGroup) {
+    playingGroup.finishedPlayers.add(playerName);
+    console.log(
+      `📊 ${groupName}: ${playingGroup.finishedPlayers.size}/${playingGroup.totalPlayers} players finished`,
+    );
+
+    // 🆕 Check if ALL players finished
+    if (playingGroup.finishedPlayers.size === playingGroup.totalPlayers) {
+      console.log(`\n🎉 ALL PLAYERS IN GROUP ${groupName} FINISHED SPEAKING!`);
+
+      // 🆕 Set bot status to IDLE immediately
+      groupBotStatus.set(groupName, "idle");
+      broadcastBotStatusUpdate(groupName, "idle");
+      console.log(`🤖 Bot status: ${groupName} → IDLE`);
+
+      // Clean up playing group tracking
+      playingGroups.delete(groupName);
+
+      // Trigger regeneration for next cycle
+      const group = groups.get(groupName);
+      if (group) {
+        const allPlayerNames = group.players.map((p) => p.name);
+        triggerRegenerationForGroup(groupName, allPlayerNames);
+      }
+    }
+  }
+
+  // Forward to all masters
+  broadcastToMasters({
+    type: "PLAYER_FINISHED",
+    playerName: playerName,
+    groupName: groupName,
+  });
+
+  console.log(`📤 Forwarded PLAYER_FINISHED to all masters`);
+}
+
+// 🆕 Trigger regeneration (extracted function)
+function triggerRegenerationForGroup(groupName, playerNames) {
+  // Send to first connected master to handle regeneration
+  for (const [, client] of clients) {
+    if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+      client.send(
+        JSON.stringify({
+          type: "TRIGGER_REGENERATION",
+          groupName: groupName,
+          playerNames: playerNames,
+        }),
+      );
+      console.log(
+        `📤 Sent TRIGGER_REGENERATION for group: ${groupName} (via master)`,
+      );
+      break;
+    }
+  }
+}
+
+async function handleTriggerRegeneration(ws, msg) {
+  const { groupName, playerNames } = msg;
+  console.log(`\n🔄 TRIGGER_REGENERATION received for group: ${groupName}`);
+  console.log(`   Players: ${playerNames.join(", ")}`);
+
+  try {
+    await executeRegenerationWorkflow(groupName, playerNames);
+
+    ws.send(
+      JSON.stringify({
+        type: "REGENERATION_COMPLETE",
+        groupName: groupName,
+      }),
+    );
+    console.log(`✅ Sent REGENERATION_COMPLETE to master\n`);
+
+    // 🆕 Reschedule AFTER regeneration completes
+    if (groupSchedules.has(groupName)) {
+      const nextDelay = getNextCycleDelay();
+      const hours = Math.floor(nextDelay / 3600);
+      const mins = Math.floor((nextDelay % 3600) / 60);
+
+      const nextRunAt = Date.now() + nextDelay * 1000;
+
+      groupSchedules.set(groupName, {
+        nextRunAt,
+        countdown: nextDelay,
+        status: "waiting",
+        isPlaying: false,
+      });
+
+      console.log(
+        `📅 Rescheduled ${groupName}: ${hours}h ${mins}m (next run at ${new Date(
+          nextRunAt,
+        ).toLocaleTimeString()})`,
+      );
+
+      // 🆕 Broadcast updated schedules to all masters
+      broadcastScheduleUpdate();
+    }
+  } catch (error) {
+    console.error(`❌ Regeneration failed:`, error);
+
+    ws.send(
+      JSON.stringify({
+        type: "REGENERATION_ERROR",
+        groupName: groupName,
+        error: error.message,
+      }),
+    );
+  }
+}
+
+// 🆕 Apply schedule settings from master
+function handleApplySchedule(msg) {
+  const { mode, time, groupNames } = msg;
+  console.log(`\n🎚️ APPLY_SCHEDULE received for ${groupNames.length} group(s)`);
+
+  groupNames.forEach((groupName) => {
+    let nextRunAt;
+
+    if (mode === "randomize") {
+      const delay = getNextCycleDelay();
+      nextRunAt = Date.now() + delay * 1000;
+      console.log(
+        `🎲 Applied randomize to ${groupName}: ${Math.floor(delay / 60)}m ${delay % 60}s`,
+      );
+    } else if (mode === "time") {
+      // Time mode - calculate next occurrence
+      const [h, m] = time.split(":").map(Number);
+      const now = new Date();
+      const next = new Date();
+      next.setHours(h, m, 0, 0);
+
+      if (next <= now) {
+        next.setDate(next.getDate() + 1);
+      }
+
+      nextRunAt = next.getTime();
+      console.log(`⏰ Applied time ${time} to ${groupName}`);
+    }
+
+    const delay = Math.floor((nextRunAt - Date.now()) / 1000);
+
+    groupSchedules.set(groupName, {
+      nextRunAt,
+      countdown: delay,
+      status: "waiting",
+      isPlaying: false,
+    });
+  });
+
+  console.log(`✅ Applied schedule to ${groupNames.length} group(s)\n`);
+
+  // 🆕 Broadcast updated schedules to all masters
+  broadcastScheduleUpdate();
+}
+
+// 🆕 Broadcast schedule updates to all masters
+function broadcastScheduleUpdate() {
+  const schedulesData = {};
+  groupSchedules.forEach((schedule, groupName) => {
+    schedulesData[groupName] = schedule;
+  });
+
+  wss.clients.forEach((client) => {
+    if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+      client.send(
+        JSON.stringify({
+          type: "SCHEDULES_UPDATE",
+          schedules: schedulesData,
+        }),
+      );
+    }
+  });
+
+  console.log(
+    `📤 Broadcast SCHEDULES_UPDATE to all masters (${Object.keys(schedulesData).length} schedules)`,
+  );
+}
+
+// 🆕 Broadcast bot status to all masters
+function broadcastBotStatusUpdate(groupName, status) {
+  wss.clients.forEach((client) => {
+    if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+      client.send(
+        JSON.stringify({
+          type: "BOT_STATUS_UPDATE",
+          groupName: groupName,
+          status: status, // "no bot" | "acquired" | "running" | "idle"
+        }),
+      );
+    }
+  });
+  console.log(`📤 Broadcast bot status: ${groupName} → ${status}`);
+}
+
+// 🆕 Handle bot acquisition from Hidemium
+function handleBotAcquired(msg) {
+  const { groupName } = msg;
+  console.log(`🤖 Bot acquired for group: ${groupName}`);
+
+  // Only set to acquired if not currently running
+  if (groupBotStatus.get(groupName) !== "running") {
+    groupBotStatus.set(groupName, "acquired");
+    broadcastBotStatusUpdate(groupName, "acquired");
+    console.log(`🤖 Bot status: ${groupName} → ACQUIRED`);
+  }
+}
+
+// 🆕 Handle bot release from Hidemium
+function handleBotReleased(msg) {
+  const { groupName } = msg;
+  console.log(`🔓 Bot released for group: ${groupName}`);
+
+  groupBotStatus.delete(groupName);
+  broadcastBotStatusUpdate(groupName, "no bot");
+  console.log(`🤖 Bot status: ${groupName} → NO BOT`);
+}
 
 /* -------------------- HELPER FUNCTIONS -------------------- */
 
@@ -647,6 +760,124 @@ app.get("/", (req, res) => {
     totalGroups: groups.size,
   });
 });
+
+/* -------------------- MESSAGE HANDLER -------------------- */
+function handleMessage(ws, raw) {
+  try {
+    const msg = JSON.parse(raw);
+    console.log(`📨 [${ws.clientId}] Received: ${msg.type}`);
+
+    const handlers = {
+      PING: () => ws.send(JSON.stringify({ type: "PONG" })),
+      JOIN_MASTER: () => handleJoinMaster(ws),
+      JOIN_PLAYER: () => handleJoinPlayer(ws, msg),
+      PLAY_AUDIO: () => handlePlayAudio(msg),
+      PLAYER_FINISHED: () => handlePlayerFinished(msg),
+      TRIGGER_REGENERATION: () => handleTriggerRegeneration(ws, msg),
+      BOT_ACQUIRED: () => handleBotAcquired(msg),
+      BOT_RELEASED: () => handleBotReleased(msg),
+      APPLY_SCHEDULE: () => handleApplySchedule(msg),
+      TOGGLE_AUTO_CYCLE: () => handleToggleAutoCycle(msg),
+    };
+
+    const handler = handlers[msg.type];
+    if (handler) {
+      handler();
+    } else {
+      console.log(`⚠️ Unknown message type: ${msg.type}`);
+    }
+  } catch (error) {
+    console.error(`❌ Error parsing message:`, error.message);
+  }
+}
+
+function handleToggleAutoCycle(msg) {
+  const { enabled } = msg;
+  console.log(`🔄 Auto-Cycle toggled: ${enabled}`);
+  // Can add more logic here if needed
+}
+
+function handleDisconnect(ws) {
+  const { clientId, role, playerName, groupName } = ws;
+
+  // Remove player from group
+  if (role === "player" && groupName && groups.has(groupName)) {
+    const group = groups.get(groupName);
+    group.players = group.players.filter((p) => p.clientId !== clientId);
+
+    console.log(`👋 ${playerName} left group ${groupName}`);
+
+    // Delete group if empty
+    if (group.players.length === 0) {
+      groups.delete(groupName);
+      playingGroups.delete(groupName);
+      groupBotStatus.delete(groupName);
+      groupSchedules.delete(groupName); // 🆕 Clean up schedule
+      console.log(`🗑️ Deleted empty group: ${groupName}`);
+    }
+
+    // Broadcast updated groups to all masters
+    broadcastToMasters({
+      type: "GROUPS_UPDATE",
+      groups: Array.from(groups.values()),
+    });
+    console.log(`📤 Sent GROUPS_UPDATE to masters (player disconnected)`);
+  }
+
+  clients.delete(clientId);
+  console.log(`🔌 [Disconnected] ${clientId}`);
+}
+
+// 🆕 Countdown ticker - runs every second
+setInterval(() => {
+  const now = Date.now();
+  let scheduleChanged = false;
+
+  groupSchedules.forEach((schedule, groupName) => {
+    if (schedule.isPlaying) return;
+
+    const remaining = Math.floor((schedule.nextRunAt - now) / 1000);
+
+    if (remaining <= 0) {
+      // Time to trigger play
+      console.log(`⏰ Auto-triggering PLAY_AUDIO for ${groupName}`);
+
+      schedule.status = "speaking";
+      schedule.isPlaying = true;
+      schedule.countdown = 0;
+      scheduleChanged = true;
+
+      // Initialize playing group tracker
+      playingGroups.set(groupName, {
+        totalPlayers: groups.get(groupName)?.players.length || 0,
+        finishedPlayers: new Set(),
+      });
+
+      // Send PLAY_AUDIO command to master
+      wss.clients.forEach((client) => {
+        if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+          client.send(
+            JSON.stringify({
+              type: "AUTO_PLAY_TRIGGERED",
+              groupName: groupName,
+            }),
+          );
+          console.log(`📤 Sent AUTO_PLAY_TRIGGERED to master for ${groupName}`);
+        }
+      });
+    } else {
+      // Update countdown
+      if (schedule.countdown !== remaining) {
+        schedule.countdown = remaining;
+        scheduleChanged = true;
+      }
+    }
+  });
+
+  if (scheduleChanged) {
+    broadcastScheduleUpdate();
+  }
+}, 1000);
 
 /* -------------------- START SERVER -------------------- */
 server.listen(PORT, "0.0.0.0", () => {

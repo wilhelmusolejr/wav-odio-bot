@@ -4,23 +4,19 @@ import NotificationList from "../components/NotificationList";
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
 
-// Random delay generators
-const getInitialDelay = () => Math.floor(Math.random() * 10 * 60); // 0-10 minutes
-const getNextCycleDelay = () =>
-  Math.floor(Math.random() * (3 * 3600 - 1 * 3600) + 1 * 3600); // 1-3 hours
-
 export default function Master() {
-  const [connected, setConnected] = useState(false); // 🔥 Remove extra ]
+  const [connected, setConnected] = useState(false);
   const [groups, setGroups] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [finishedPlayers, setFinishedPlayers] = useState({});
-  const [groupSchedules, setGroupSchedules] = useState({});
+  const [groupSchedules, setGroupSchedules] = useState({}); // 🔥 UI state only, synced from server
   const [autoCycleEnabled, setAutoCycleEnabled] = useState(true);
+  const [botStatus, setBotStatus] = useState({});
 
-  // 🆕 Scheduler control settings
+  // Scheduler control settings
   const [scheduleMode, setScheduleMode] = useState("randomize");
   const [scheduleTime, setScheduleTime] = useState("");
-  const [selectedGroups, setSelectedGroups] = useState(new Set()); // Groups to apply settings to
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
 
   const wsRef = useRef(null);
   const groupsRef = useRef([]);
@@ -29,99 +25,7 @@ export default function Master() {
     groupsRef.current = groups;
   }, [groups]);
 
-  // Load schedules from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("groupSchedules");
-    if (saved) {
-      try {
-        setGroupSchedules(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to load schedules:", e);
-      }
-    }
-  }, []);
-
-  // Save schedules to localStorage
-  useEffect(() => {
-    if (Object.keys(groupSchedules).length > 0) {
-      localStorage.setItem("groupSchedules", JSON.stringify(groupSchedules));
-    }
-  }, [groupSchedules]);
-
-  // Initialize schedules for new groups
-  useEffect(() => {
-    if (!autoCycleEnabled || groups.length === 0) return;
-
-    groups.forEach((group) => {
-      if (!groupSchedules[group.name]) {
-        const delaySec = getInitialDelay();
-        const nextRunAt = Date.now() + delaySec * 1000;
-
-        console.log(
-          `🎲 Initial schedule for ${group.name}: ${Math.floor(delaySec / 60)}m ${delaySec % 60}s`,
-        );
-
-        setGroupSchedules((prev) => ({
-          ...prev,
-          [group.name]: {
-            nextRunAt,
-            countdown: delaySec,
-            isPlaying: false,
-            status: "waiting", // 🆕 Status field
-          },
-        }));
-      }
-    });
-  }, [groups, autoCycleEnabled]);
-
-  // Countdown ticker
-  useEffect(() => {
-    if (!autoCycleEnabled) return;
-
-    const interval = setInterval(() => {
-      const now = Date.now();
-
-      setGroupSchedules((prev) => {
-        const updated = { ...prev };
-        let triggeredAny = false;
-
-        Object.keys(updated).forEach((groupName) => {
-          const schedule = updated[groupName];
-
-          if (schedule.isPlaying) {
-            return;
-          }
-
-          const remaining = Math.floor((schedule.nextRunAt - now) / 1000);
-
-          if (remaining <= 0) {
-            console.log(`⏰ Auto-triggering ${groupName}`);
-            sendPlayCommand(groupName);
-            triggeredAny = true;
-
-            updated[groupName] = {
-              ...schedule,
-              isPlaying: true,
-              countdown: 0,
-              status: "speaking", // 🆕 Update status
-            };
-
-            console.log(`▶️ ${groupName} is now speaking`);
-          } else {
-            updated[groupName] = {
-              ...schedule,
-              countdown: remaining,
-              status: "waiting", // 🆕 Status stays waiting
-            };
-          }
-        });
-
-        return triggeredAny ? { ...updated } : updated;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [autoCycleEnabled]);
+  // 🔥 REMOVED: localStorage loading/saving
 
   // WebSocket setup
   useEffect(() => {
@@ -131,6 +35,7 @@ export default function Master() {
       console.log("✅ Master connected");
       setConnected(true);
       ws.send(JSON.stringify({ type: "JOIN_MASTER" }));
+      console.log("📤 Sent JOIN_MASTER");
     };
 
     ws.onmessage = (event) => {
@@ -142,18 +47,45 @@ export default function Master() {
           case "PONG":
             console.log("💓 Heartbeat");
             break;
+
           case "GROUPS_UPDATE":
+            console.log("📊 Groups updated:", data.groups);
             setGroups(data.groups);
             break;
+
           case "INITIAL_GROUPS":
+            console.log("📋 Initial groups:", data.groups);
             setGroups(data.groups);
+            // 🆕 Get initial schedules from server
+            if (data.schedules) {
+              console.log("📅 Initial schedules:", data.schedules);
+              setGroupSchedules(data.schedules);
+            }
             break;
+
           case "PLAYER_FINISHED":
             handlePlayerFinished(data.playerName, data.groupName);
             break;
+
           case "REGENERATION_COMPLETE":
             handleRegenerationComplete(data.groupName);
             break;
+
+          case "BOT_STATUS_UPDATE":
+            console.log(
+              `🤖 Bot status update: ${data.groupName} → ${data.status}`,
+            );
+            setBotStatus((prev) => ({
+              ...prev,
+              [data.groupName]: data.status,
+            }));
+            break;
+
+          case "SCHEDULES_UPDATE": // 🆕 Server broadcasts schedule updates
+            console.log("📅 Schedules updated from server:", data.schedules);
+            setGroupSchedules(data.schedules);
+            break;
+
           default:
             console.log("⚠️ Unknown message type:", data.type);
         }
@@ -220,15 +152,6 @@ export default function Master() {
           console.log(`\n🎉 ALL PLAYERS IN GROUP ${groupName} FINISHED!`);
           triggerRegeneration(groupName, allPlayerNames);
 
-          // 🆕 Update status to done
-          setGroupSchedules((prev) => ({
-            ...prev,
-            [groupName]: {
-              ...prev[groupName],
-              status: "done",
-            },
-          }));
-
           return {
             ...updated,
             [groupName]: [],
@@ -261,28 +184,10 @@ export default function Master() {
         playerName: "System",
         groupName: groupName,
         timestamp: new Date().toISOString(),
-        message: "🔄 Regeneration complete - Next cycle scheduled",
+        message: "🔄 Regeneration complete - Ready for next cycle",
       },
       ...prev.slice(0, 4),
     ]);
-
-    if (autoCycleEnabled) {
-      const nextDelay = getNextCycleDelay();
-      const hours = Math.floor(nextDelay / 3600);
-      const mins = Math.floor((nextDelay % 3600) / 60);
-
-      console.log(`📅 Next cycle for ${groupName}: ${hours}h ${mins}m`);
-
-      setGroupSchedules((prev) => ({
-        ...prev,
-        [groupName]: {
-          nextRunAt: Date.now() + nextDelay * 1000,
-          countdown: nextDelay,
-          isPlaying: false,
-          status: "waiting", // 🆕 Reset to waiting
-        },
-      }));
-    }
   };
 
   const sendPlayCommand = (groupName) => {
@@ -290,16 +195,6 @@ export default function Master() {
       setFinishedPlayers((prev) => ({
         ...prev,
         [groupName]: [],
-      }));
-
-      setGroupSchedules((prev) => ({
-        ...prev,
-        [groupName]: {
-          ...prev[groupName],
-          isPlaying: true,
-          countdown: 0,
-          status: "speaking", // 🆕 Update status
-        },
       }));
 
       wsRef.current.send(
@@ -323,7 +218,7 @@ export default function Master() {
     setSelectedGroups(newSelected);
   };
 
-  // 🆕 Apply schedule settings to selected groups
+  // 🆕 Apply schedule settings - SEND TO SERVER
   const applyScheduleSettings = () => {
     if (selectedGroups.size === 0) {
       alert("Please select at least one group");
@@ -335,44 +230,23 @@ export default function Master() {
       return;
     }
 
-    selectedGroups.forEach((groupName) => {
-      let nextRunAt;
-
-      if (scheduleMode === "randomize") {
-        const delay = getNextCycleDelay();
-        nextRunAt = Date.now() + delay * 1000;
-        console.log(`🎲 Applied randomize to ${groupName}`);
-      } else {
-        // Time mode - calculate next occurrence
-        const [h, m] = scheduleTime.split(":").map(Number);
-        const now = new Date();
-        const next = new Date();
-        next.setHours(h, m, 0, 0);
-
-        if (next <= now) {
-          next.setDate(next.getDate() + 1);
-        }
-
-        nextRunAt = next.getTime();
-        console.log(`⏰ Applied time ${scheduleTime} to ${groupName}`);
-      }
-
-      setGroupSchedules((prev) => ({
-        ...prev,
-        [groupName]: {
-          ...prev[groupName],
-          nextRunAt,
-          countdown: Math.floor((nextRunAt - Date.now()) / 1000),
-          status: "waiting",
-        },
-      }));
-    });
+    // 🆕 Send to server instead of local state
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "APPLY_SCHEDULE",
+          mode: scheduleMode,
+          time: scheduleTime,
+          groupNames: Array.from(selectedGroups),
+        }),
+      );
+      console.log(
+        `📤 Sent APPLY_SCHEDULE to server for ${selectedGroups.size} group(s)`,
+      );
+    }
 
     // Reset selections
     setSelectedGroups(new Set());
-    console.log(
-      `✅ Applied schedule settings to ${selectedGroups.size} group(s)`,
-    );
   };
 
   // 🆕 Format countdown
@@ -427,7 +301,21 @@ export default function Master() {
                 <input
                   type="checkbox"
                   checked={autoCycleEnabled}
-                  onChange={(e) => setAutoCycleEnabled(e.target.checked)}
+                  onChange={(e) => {
+                    setAutoCycleEnabled(e.target.checked);
+                    // 🆕 Send toggle to server
+                    if (
+                      wsRef.current &&
+                      wsRef.current.readyState === WebSocket.OPEN
+                    ) {
+                      wsRef.current.send(
+                        JSON.stringify({
+                          type: "TOGGLE_AUTO_CYCLE",
+                          enabled: e.target.checked,
+                        }),
+                      );
+                    }
+                  }}
                   className="w-4 h-4"
                 />
                 <span>🔄 Auto-Cycle</span>
@@ -447,7 +335,7 @@ export default function Master() {
           </div>
         </div>
 
-        {/* 🆕 SCHEDULER CONTROL PANEL - REFACTORED */}
+        {/* 🆕 SCHEDULER CONTROL PANEL */}
         <div className="bg-gray-800 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-bold mb-4">🎚️ Schedule Control</h2>
 
@@ -498,7 +386,7 @@ export default function Master() {
               </div>
             )}
 
-            {/* 🆕 Groups Selection List */}
+            {/* Groups Selection List */}
             <div>
               <label className="block text-sm font-semibold mb-3">
                 Apply to Groups
@@ -528,7 +416,7 @@ export default function Master() {
                           ({group.players.length} players)
                         </span>
                       </div>
-                      {/* 🆕 Show current status */}
+                      {/* Show current status */}
                       <div className="text-xs">
                         {groupSchedules[group.name] && (
                           <span className="text-gray-400">
@@ -553,7 +441,7 @@ export default function Master() {
               </p>
             </div>
 
-            {/* 🆕 Submit Button */}
+            {/* Submit Button */}
             <button
               onClick={applyScheduleSettings}
               className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -579,6 +467,7 @@ export default function Master() {
           ) : (
             groups.map((group) => {
               const schedule = groupSchedules[group.name];
+              const status = botStatus[group.name] || "no bot";
 
               return (
                 <div
@@ -597,6 +486,13 @@ export default function Master() {
                             {group.players.length} finished)
                           </span>
                         )}
+                      </p>
+                      {/* Bot Status */}
+                      <p className="text-xs text-blue-400 mt-1">
+                        {status === "acquired" && "🤖 Bot Acquired"}
+                        {status === "running" && "▶️ Bot Running"}
+                        {status === "idle" && "⏸️ Bot Idle"}
+                        {status === "no bot" && "🔴 No Bot"}
                       </p>
                     </div>
 
