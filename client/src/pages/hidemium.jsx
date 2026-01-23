@@ -146,13 +146,13 @@ export default function Hidemium() {
   const getStatusText = (status) => {
     switch (status) {
       case "no bot":
-        return "🔴 No Bot";
+        return "No Bot";
       case "acquired":
-        return "🤖 Bot Acquired";
+        return "Bot Acquired";
       case "running":
-        return "▶️ Running";
+        return "Running";
       case "idle":
-        return "⏸️ Idle";
+        return "Idle";
       default:
         return "—";
     }
