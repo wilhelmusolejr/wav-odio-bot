@@ -8,7 +8,7 @@ export default function Master() {
   const [groups, setGroups] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [finishedPlayers, setFinishedPlayers] = useState({});
-  const [groupSchedules, setGroupSchedules] = useState({}); // 🔥 UI state only, synced from server
+  const [groupSchedules, setGroupSchedules] = useState({});
   const [autoCycleEnabled, setAutoCycleEnabled] = useState(true);
   const [botStatus, setBotStatus] = useState({});
 
