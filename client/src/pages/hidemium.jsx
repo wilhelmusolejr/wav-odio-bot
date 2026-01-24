@@ -6,7 +6,7 @@ export default function Hidemium() {
   const [connected, setConnected] = useState(false);
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(new Set());
-  const [botStatus, setBotStatus] = useState({}); // 🆕 Track bot status per group
+  const [botStatus, setBotStatus] = useState({});
   const wsRef = useRef(null);
 
   // WebSocket connection
@@ -38,13 +38,12 @@ export default function Hidemium() {
           case "INITIAL_GROUPS":
             console.log("📋 Initial groups:", data.groups);
             setGroups(data.groups);
-            // 🆕 Set initial bot status
             if (data.botStatus) {
               setBotStatus(data.botStatus);
             }
             break;
 
-          case "BOT_STATUS_UPDATE": // 🆕
+          case "BOT_STATUS_UPDATE":
             console.log(
               `🤖 Bot status update: ${data.groupName} → ${data.status}`,
             );
@@ -74,7 +73,6 @@ export default function Hidemium() {
 
     wsRef.current = ws;
 
-    // Heartbeat
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "PING" }));
@@ -102,10 +100,8 @@ export default function Hidemium() {
       return newSelected;
     });
 
-    // 🆕 Send bot acquisition/release message
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       if (isCurrentlySelected) {
-        // Releasing bot
         wsRef.current.send(
           JSON.stringify({
             type: "BOT_RELEASED",
@@ -114,7 +110,6 @@ export default function Hidemium() {
         );
         console.log(`🔓 Released bot for: ${groupName}`);
       } else {
-        // Acquiring bot
         wsRef.current.send(
           JSON.stringify({
             type: "BOT_ACQUIRED",
@@ -126,36 +121,42 @@ export default function Hidemium() {
     }
   };
 
-  // 🆕 Get status badge color
   const getStatusColor = (status) => {
     switch (status) {
       case "no bot":
-        return "text-gray-400";
+        return "bg-gray-500";
       case "acquired":
-        return "text-blue-400";
+        return "bg-blue-500";
       case "running":
-        return "text-green-400";
+        return "bg-green-500";
       case "idle":
-        return "text-yellow-400";
+        return "bg-yellow-500";
       default:
-        return "text-gray-400";
+        return "bg-gray-500";
     }
   };
 
-  // 🆕 Get status text
   const getStatusText = (status) => {
     switch (status) {
       case "no bot":
         return "No Bot";
       case "acquired":
-        return "Bot Acquired";
+        return "Acquired";
       case "running":
         return "Running";
       case "idle":
         return "Idle";
       default:
-        return "—";
+        return "Unknown";
     }
+  };
+
+  const getSessionStatus = (group) => {
+    return group.players.length > 0 ? "Active" : "Inactive";
+  };
+
+  const getSessionColor = (group) => {
+    return group.players.length > 0 ? "bg-green-500" : "bg-gray-500";
   };
 
   return (
@@ -166,7 +167,6 @@ export default function Hidemium() {
           <div className="flex items-center justify-between">
             <h1 className="text-5xl font-bold">🖥️ Hidemium Control</h1>
 
-            {/* Connection Status */}
             <div className="flex items-center gap-2">
               <div
                 className={`w-3 h-3 rounded-full ${
@@ -200,52 +200,50 @@ export default function Hidemium() {
                     isSelected ? "ring-2 ring-blue-500" : ""
                   }`}
                 >
-                  {/* Group Name */}
-                  <h3 className="text-xl font-bold mb-4">🌐 {group.name}</h3>
+                  {/* 1. Group Name */}
+                  <h3 className="text-2xl font-bold mb-6 text-blue-400">
+                    🌐 {group.name}
+                  </h3>
 
-                  {/* Server Name */}
-                  <div className="mb-3">
-                    <label className="text-sm text-gray-400 block mb-1">
-                      Server Name
-                    </label>
-                    <p id="server_name" className="text-white font-medium">
-                      {group.name}
-                    </p>
+                  {/* 2. Session Status */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <span className="text-sm text-gray-400">
+                      Session Status
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${getSessionColor(group)}`}
+                      ></div>
+                      <span className="text-sm font-medium">
+                        {getSessionStatus(group)} ({group.players.length}{" "}
+                        players)
+                      </span>
+                    </span>
                   </div>
 
-                  {/* Status */}
-                  <div className="mb-3">
-                    <label className="text-sm text-gray-400 block mb-1">
-                      Status
-                    </label>
-                    <p
-                      id="status"
-                      className={`${getStatusColor(status)} font-medium text-sm`}
-                    >
-                      {getStatusText(status)}
-                    </p>
+                  {/* 3. Bot Status */}
+                  <div className="mb-6 flex items-center justify-between">
+                    <span className="text-sm text-gray-400">Bot Status</span>
+                    <span className="flex items-center gap-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${getStatusColor(status)}`}
+                      ></div>
+                      <span className="text-sm font-medium">
+                        {getStatusText(status)}
+                      </span>
+                    </span>
                   </div>
 
-                  {/* Players Count */}
-                  <div className="mb-4">
-                    <label className="text-sm text-gray-400 block mb-1">
-                      Players
-                    </label>
-                    <p className="text-white font-medium text-sm">
-                      👥 {group.players.length} player(s)
-                    </p>
-                  </div>
-
-                  {/* Checkbox */}
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  {/* Checkbox - Acquire Bot */}
+                  <label className="flex items-center gap-3 cursor-pointer p-3 bg-gray-700 rounded-lg hover:bg-gray-650 transition">
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => handleCheckboxChange(group.name)}
-                      className="w-5 h-5"
+                      className="w-5 h-5 accent-blue-500"
                     />
-                    <span className="text-sm">
-                      {isSelected ? "Release Bot" : "Acquire Bot"}
+                    <span className="text-sm font-medium">
+                      {isSelected ? "🔓 Release Bot" : "🤖 Acquire Bot"}
                     </span>
                   </label>
                 </div>
