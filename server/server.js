@@ -52,6 +52,7 @@ const groups = new Map();
 const groupBotStatus = new Map();
 const playingGroups = new Map();
 const groupSchedules = new Map(); // 🆕 Store schedules server-side
+const bots = new Map(); // 🆕 track bots
 
 let clientIdCounter = 0;
 
@@ -95,6 +96,7 @@ function handleJoinMaster(ws) {
       type: "INITIAL_GROUPS",
       groups: Array.from(groups.values()),
       schedules: schedulesData, // 🆕 Include schedules
+      bots: Array.from(bots.values()), // 🆕 send bots
     }),
   );
 }
@@ -232,6 +234,53 @@ function handlePlayerFinished(msg) {
   });
 
   console.log(`📤 Forwarded PLAYER_FINISHED to all masters`);
+}
+
+// 🆕 Handle bot assignment
+function handleAssignBot(msg) {
+  const { botName, groupName } = msg;
+
+  const bot = Array.from(bots.values()).find((b) => b.botName === botName);
+
+  if (!bot) {
+    console.log(`❌ Bot ${botName} not found`);
+    return;
+  }
+
+  if (bot.status !== "available" || bot.hasGroup) {
+    console.log(`❌ Bot ${botName} is not available`);
+    return;
+  }
+
+  // Update bot
+  bots.set(bot.id, {
+    ...bot,
+    status: "occupied",
+    hasGroup: true,
+    groupName: groupName,
+  });
+
+  console.log(`✅ Assigned bot ${botName} to group ${groupName}`);
+
+  // Notify the bot
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "bot" &&
+      client.botName === botName &&
+      client.readyState === WebSocket.OPEN
+    ) {
+      client.send(
+        JSON.stringify({
+          type: "BOT_ASSIGNED",
+          groupName: groupName,
+          sessionStatus: "speaking",
+        }),
+      );
+    }
+  });
+
+  // Broadcast updated bot list
+  broadcastBotsList();
 }
 
 // 🆕 Trigger regeneration (extracted function)
@@ -771,6 +820,9 @@ function handleMessage(ws, raw) {
       PING: () => ws.send(JSON.stringify({ type: "PONG" })),
       JOIN_MASTER: () => handleJoinMaster(ws),
       JOIN_PLAYER: () => handleJoinPlayer(ws, msg),
+      JOIN_BOT: () => handleJoinBot(ws, msg),
+      ASSIGN_BOT: () => handleAssignBot(msg),
+      RELEASE_BOT: () => handleReleaseBot(msg), // 🆕
       PLAY_AUDIO: () => handlePlayAudio(msg),
       PLAYER_FINISHED: () => handlePlayerFinished(msg),
       TRIGGER_REGENERATION: () => handleTriggerRegeneration(ws, msg),
@@ -789,6 +841,84 @@ function handleMessage(ws, raw) {
   } catch (error) {
     console.error(`❌ Error parsing message:`, error.message);
   }
+}
+
+// 🆕 Handle bot join
+function handleJoinBot(ws, msg) {
+  const botName = msg.botName || "anonymous-bot";
+  ws.role = "bot";
+  ws.botName = botName;
+
+  bots.set(ws.clientId, {
+    id: ws.clientId,
+    botName,
+    status: "available",
+    hasGroup: false,
+    groupName: null,
+  });
+
+  console.log(`🤖 ${ws.clientId} joined as BOT (${botName})`);
+  broadcastBotsList();
+}
+
+// 🆕 Handle bot release when all players finish
+function handleReleaseBot(msg) {
+  const { groupName } = msg;
+  console.log(`🔓 Releasing bot for group: ${groupName}`);
+
+  // Find bot assigned to this group
+  const botEntry = Array.from(bots.entries()).find(
+    ([id, bot]) => bot.status === "occupied" && bot.groupName === groupName,
+  );
+
+  if (!botEntry) {
+    console.log(`⚠️ No bot assigned to group ${groupName}`);
+    return;
+  }
+
+  const [botId, bot] = botEntry;
+
+  // Update bot status to available
+  bots.set(botId, {
+    ...bot,
+    status: "available",
+    hasGroup: false,
+    groupName: null,
+  });
+
+  console.log(`✅ Bot ${bot.botName} released from group ${groupName}`);
+
+  // Notify the bot
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "bot" &&
+      client.botName === bot.botName &&
+      client.readyState === WebSocket.OPEN
+    ) {
+      client.send(
+        JSON.stringify({
+          type: "BOT_RELEASED",
+        }),
+      );
+      console.log(`📤 Sent BOT_RELEASED to ${bot.botName}`);
+    }
+  });
+
+  // Broadcast updated bot list
+  broadcastBotsList();
+}
+
+// 🆕 Broadcast bots list to masters
+function broadcastBotsList() {
+  const payload = {
+    type: "BOT_LIST_UPDATE",
+    bots: Array.from(bots.values()),
+  };
+  wss.clients.forEach((client) => {
+    if (client.role === "master" && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(payload));
+    }
+  });
 }
 
 function handleToggleAutoCycle(msg) {
@@ -822,6 +952,12 @@ function handleDisconnect(ws) {
       groups: Array.from(groups.values()),
     });
     console.log(`📤 Sent GROUPS_UPDATE to masters (player disconnected)`);
+  }
+
+  if (role === "bot") {
+    // 🆕 remove bot on disconnect
+    bots.delete(clientId);
+    broadcastBotsList();
   }
 
   clients.delete(clientId);
