@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useParams } from "react-router-dom"; // 🆕 add
 
 const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
 
 export default function Hidemium() {
+  const { botName } = useParams(); // 🆕 read param
+
   const [connected, setConnected] = useState(false);
-  const [groups, setGroups] = useState([]);
-  const [selectedGroups, setSelectedGroups] = useState(new Set());
-  const [botStatus, setBotStatus] = useState({});
+  const [botStatus, setBotStatus] = useState("available"); // 🆕 available | working
+  const [groupName, setGroupName] = useState(null); // 🆕 assigned by master
+  const [sessionStatus, setSessionStatus] = useState("idle"); // 🆕 speaking | idle | done
   const wsRef = useRef(null);
 
   // WebSocket connection
@@ -14,10 +17,15 @@ export default function Hidemium() {
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-      console.log("✅ Hidemium connected to WebSocket server");
+      console.log("✅ Bot connected to WebSocket server");
       setConnected(true);
-      ws.send(JSON.stringify({ type: "JOIN_MASTER" }));
-      console.log("📤 Sent JOIN_MASTER");
+      ws.send(
+        JSON.stringify({
+          type: "JOIN_BOT",
+          botName: botName || "anonymous-bot",
+        }),
+      );
+      console.log("📤 Sent JOIN_BOT");
     };
 
     ws.onmessage = (event) => {
@@ -30,27 +38,23 @@ export default function Hidemium() {
             console.log("💓 Heartbeat");
             break;
 
-          case "GROUPS_UPDATE":
-            console.log("📊 Groups updated:", data.groups);
-            setGroups(data.groups);
+          case "BOT_ASSIGNED": // Master assigns bot to group
+            console.log(`🤖 Assigned to group: ${data.groupName}`);
+            setGroupName(data.groupName);
+            setBotStatus("occupied");
+            setSessionStatus(data.sessionStatus);
             break;
 
-          case "INITIAL_GROUPS":
-            console.log("📋 Initial groups:", data.groups);
-            setGroups(data.groups);
-            if (data.botStatus) {
-              setBotStatus(data.botStatus);
-            }
+          case "BOT_RELEASED": // Master releases bot
+            console.log("🔓 Bot released from group");
+            setGroupName(null);
+            setBotStatus("available");
+            setSessionStatus("idle");
             break;
 
-          case "BOT_STATUS_UPDATE":
-            console.log(
-              `🤖 Bot status update: ${data.groupName} → ${data.status}`,
-            );
-            setBotStatus((prev) => ({
-              ...prev,
-              [data.groupName]: data.status,
-            }));
+          case "SESSION_STATUS_UPDATE": // Update session status
+            console.log(`📊 Session status: ${data.status}`);
+            setSessionStatus(data.status); // speaking | idle | done
             break;
 
           default:
@@ -87,86 +91,31 @@ export default function Hidemium() {
     };
   }, []);
 
-  const handleCheckboxChange = (groupName) => {
-    const isCurrentlySelected = selectedGroups.has(groupName);
-
-    setSelectedGroups((prev) => {
-      const newSelected = new Set(prev);
-      if (newSelected.has(groupName)) {
-        newSelected.delete(groupName);
-      } else {
-        newSelected.add(groupName);
-      }
-      return newSelected;
-    });
-
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      if (isCurrentlySelected) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "BOT_RELEASED",
-            groupName: groupName,
-          }),
-        );
-        console.log(`🔓 Released bot for: ${groupName}`);
-      } else {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "BOT_ACQUIRED",
-            groupName: groupName,
-          }),
-        );
-        console.log(`🤖 Acquired bot for: ${groupName}`);
-      }
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case "no bot":
-        return "bg-gray-500";
-      case "acquired":
-        return "bg-blue-500";
-      case "running":
-        return "bg-green-500";
-      case "idle":
+  const getSessionStatusColor = () => {
+    switch (sessionStatus) {
+      case "speaking":
         return "bg-yellow-500";
+      case "idle":
+        return "bg-gray-500";
+      case "done":
+        return "bg-green-500";
       default:
         return "bg-gray-500";
     }
   };
 
-  const getStatusText = (status) => {
-    switch (status) {
-      case "no bot":
-        return "No Bot";
-      case "acquired":
-        return "Acquired";
-      case "running":
-        return "Running";
-      case "idle":
-        return "Idle";
-      default:
-        return "Unknown";
-    }
-  };
-
-  const getSessionStatus = (group) => {
-    return group.players.length > 0 ? "Active" : "Inactive";
-  };
-
-  const getSessionColor = (group) => {
-    return group.players.length > 0 ? "bg-green-500" : "bg-gray-500";
+  const getBotStatusColor = () => {
+    // 🆕 add this function
+    return botStatus === "available" ? "bg-green-500" : "bg-blue-500";
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
-            <h1 className="text-5xl font-bold">🖥️ Hidemium Control</h1>
-
+            <h1 className="text-5xl font-bold">🤖 Bot Control Panel</h1>
             <div className="flex items-center gap-2">
               <div
                 className={`w-3 h-3 rounded-full ${
@@ -178,98 +127,45 @@ export default function Hidemium() {
               </span>
             </div>
           </div>
+          <p className="text-gray-400 mt-2">
+            Bot Name: {botName || "anonymous-bot"}
+          </p>
         </div>
 
-        {/* Groups Grid */}
-        {groups.length === 0 ? (
-          <div className="bg-gray-800 rounded-lg p-8 text-center">
-            <p className="text-gray-400 text-lg">
-              ⏳ Waiting for groups to load...
-            </p>
+        {/* Bot Status Card */}
+        <div className="bg-gray-800 rounded-lg p-8">
+          {/* Bot Status */}
+          <div className="mb-6 flex items-center justify-between">
+            <span className="text-lg text-gray-300">Bot Status</span>
+            <span className="flex items-center gap-2">
+              <div
+                className={`w-3 h-3 rounded-full ${getBotStatusColor()}`}
+              ></div>
+              <span className="text-lg font-bold capitalize">{botStatus}</span>
+            </span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {groups.map((group) => {
-              const status = botStatus[group.name] || "no bot";
-              const isSelected = selectedGroups.has(group.name);
 
-              return (
-                <div
-                  key={group.name}
-                  className={`bg-gray-800 rounded-lg p-6 hover:bg-gray-750 transition ${
-                    isSelected ? "ring-2 ring-blue-500" : ""
-                  }`}
-                >
-                  {/* 1. Group Name */}
-                  <h3 className="text-2xl font-bold mb-6 text-blue-400">
-                    🌐 {group.name}
-                  </h3>
-
-                  {/* 2. Session Status */}
-                  <div className="mb-4 flex items-center justify-between">
-                    <span className="text-sm text-gray-400">
-                      Session Status
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <div
-                        className={`w-2 h-2 rounded-full ${getSessionColor(group)}`}
-                      ></div>
-                      <span className="text-sm font-medium">
-                        {getSessionStatus(group)} ({group.players.length}{" "}
-                        players)
-                      </span>
-                    </span>
-                  </div>
-
-                  {/* 3. Bot Status */}
-                  <div className="mb-6 flex items-center justify-between">
-                    <span className="text-sm text-gray-400">Bot Status</span>
-                    <span className="flex items-center gap-2">
-                      <div
-                        className={`w-2 h-2 rounded-full ${getStatusColor(status)}`}
-                      ></div>
-                      <span className="text-sm font-medium">
-                        {getStatusText(status)}
-                      </span>
-                    </span>
-                  </div>
-
-                  {/* Checkbox - Acquire Bot */}
-                  <label className="flex items-center gap-3 cursor-pointer p-3 bg-gray-700 rounded-lg hover:bg-gray-650 transition">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => handleCheckboxChange(group.name)}
-                      className="w-5 h-5 accent-blue-500"
-                    />
-                    <span className="text-sm font-medium">
-                      {isSelected ? "🔓 Release Bot" : "🤖 Acquire Bot"}
-                    </span>
-                  </label>
-                </div>
-              );
-            })}
+          {/* Group Name - show only if assigned */}
+          <div className="mb-6 flex items-center justify-between">
+            <span className="text-lg text-gray-300">Assigned Group</span>
+            <span className="text-lg font-bold">
+              {groupName ? `🌐 ${groupName}` : "Not assigned"}
+            </span>
           </div>
-        )}
 
-        {/* Selected Groups Summary */}
-        {selectedGroups.size > 0 && (
-          <div className="mt-8 bg-gray-800 rounded-lg p-6">
-            <h3 className="text-xl font-bold mb-4">
-              🤖 Active Bots ({selectedGroups.size})
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {Array.from(selectedGroups).map((groupName) => (
-                <span
-                  key={groupName}
-                  className="px-3 py-1 bg-blue-600 rounded-full text-sm"
-                >
-                  {groupName}
+          {/* Session Status - show only if bot is working */}
+          {botStatus === "occupied" && (
+            <div className="flex items-center justify-between">
+              <span className="text-lg text-gray-300">Session Status</span>
+              <span className="flex items-center gap-2">
+                <div className={` ${getSessionStatusColor()}`}></div>
+                <span className="text-lg font-bold capitalize">
+                  {sessionStatus}
                 </span>
-              ))}
+              </span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
