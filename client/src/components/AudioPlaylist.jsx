@@ -24,7 +24,7 @@ export default function AudioPlaylist({
       {/* Hidden Audio Element */}
       <audio
         ref={audioRef}
-        src={currentAudioIndex !== null ? audioList[currentAudioIndex].url : ""}
+        src={audioList[currentAudioIndex]?.url || ""} // 🆕 always set src
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={onLoadedMetadata}
         onEnded={onEnded}

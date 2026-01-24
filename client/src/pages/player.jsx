@@ -50,6 +50,7 @@ export default function Player() {
     duration,
     audioList,
     handleLoadAudio,
+    handleAudioError,
     handleStartPlayback,
     togglePlayPause,
     handleTimeUpdate,

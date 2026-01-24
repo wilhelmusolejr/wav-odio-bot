@@ -16,6 +16,22 @@ export function useAudioPlayer({ wsRef, playerName, groupName }) {
     const index = currentAudioIndex;
     const attempts = (retryCount[index] || 0) + 1;
 
+    // Don't retry if src is empty
+    if (!audioList[index]?.url) {
+      console.error(`❌ No src for audio ${index}, skipping`);
+      playNextAudio();
+      return;
+    }
+
+    if (attempts < MAX_RETRIES) {
+      setRetryCount((prev) => ({ ...prev, [index]: attempts }));
+      if (audioRef.current) {
+        audioRef.current.load();
+      }
+    } else {
+      playNextAudio();
+    }
+
     console.error(
       `⚠️ Audio failed to load (attempt ${attempts}/${MAX_RETRIES}):`,
       err?.target?.error,
