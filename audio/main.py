@@ -60,6 +60,13 @@ accounts = [
   }
 ]
 
+# totoyoymonaxia
+# paraximonaxi
+# koooooalaid
+# botfrag666
+# echogreg
+# elooo2092
+
 CONFIG = [
     {
         "username": "botfrag666", 
