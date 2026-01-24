@@ -8,6 +8,7 @@ export default function AudioPlaylist({
   onPlayPause,
   onTimeUpdate,
   onLoadedMetadata,
+  handleAudioError,
   onSeek,
   onEnded,
   formatTime,
@@ -27,14 +28,7 @@ export default function AudioPlaylist({
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={onLoadedMetadata}
         onEnded={onEnded}
-        onError={(e) => {
-          if (currentAudioIndex !== null) {
-            console.error("❌ Audio load error:", {
-              src: audioList[currentAudioIndex]?.url,
-              message: e.target?.error?.message || "Unknown error",
-            });
-          }
-        }}
+        onError={handleAudioError}
         crossOrigin="anonymous"
         preload="metadata"
       />
