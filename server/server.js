@@ -58,8 +58,15 @@ let clientIdCounter = 0;
 
 // 🆕 Helper functions for scheduling
 const getInitialDelay = () => Math.floor(Math.random() * 10 * 60); // 0-10 minutes
-const getNextCycleDelay = () =>
-  Math.floor(Math.random() * (3 * 3600 - 1 * 3600) + 1 * 3600); // 1-3 hours
+const getNextCycleDelay = (min_hour = 1, max_hour = 3) => {
+  const minSeconds = min_hour * 3600;
+  const maxSeconds = max_hour * 3600;
+
+  return Math.floor(Math.random() * (maxSeconds - minSeconds) + minSeconds);
+};
+
+const randomInt = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
 
 /* -------------------- WEBSOCKET HANDLERS -------------------- */
 wss.on("connection", (ws, req) => {
@@ -321,7 +328,7 @@ async function handleTriggerRegeneration(ws, msg) {
 
     // 🆕 Reschedule AFTER regeneration completes
     if (groupSchedules.has(groupName)) {
-      const nextDelay = getNextCycleDelay();
+      const nextDelay = getNextCycleDelay(3, 5);
       const hours = Math.floor(nextDelay / 3600);
       const mins = Math.floor((nextDelay % 3600) / 60);
 
@@ -693,11 +700,13 @@ async function triggerAudioGenerator(groupName, playerNames) {
   console.log(`\n🎙️ Step 2: Triggering audio generator...`);
   console.log(`   🐍 Running Python audio generator...`);
 
+  let toGenerateFiles = randomInt(5, 10);
+
   return new Promise((resolve, reject) => {
     // Build accounts configuration for Python script
     const accounts = playerNames.map((playerName) => ({
       username: playerName,
-      audios: 1, // Generate 1 audio file per player
+      audios: toGenerateFiles, // Generate 1 audio file per player
     }));
 
     const accountsJson = JSON.stringify(accounts);
@@ -846,7 +855,8 @@ function handleMessage(ws, raw) {
 
 // 🆕 Add schedule for a single group
 function handleAddSchedule(msg) {
-  const { groupName, mode } = msg;
+  const { groupName } = msg;
+
   console.log(`\n📅 ADD_SCHEDULE received for ${groupName}`);
 
   const delay = getNextCycleDelay();
