@@ -18,7 +18,6 @@ export default function Player() {
   const [showSetupModal, setShowSetupModal] = useState(true);
   const [playerName, setPlayerName] = useState("");
   const [groupName, setGroupName] = useState("");
-  const [totalDuration, setTotalDuration] = useState(0);
 
   // 🔥 Only connect WebSocket after setup is complete
   const wsRef = usePlayerWebSocket({
