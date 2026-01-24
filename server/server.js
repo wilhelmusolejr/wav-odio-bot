@@ -828,6 +828,7 @@ function handleMessage(ws, raw) {
       TRIGGER_REGENERATION: () => handleTriggerRegeneration(ws, msg),
       BOT_ACQUIRED: () => handleBotAcquired(msg),
       BOT_RELEASED: () => handleBotReleased(msg),
+      ADD_SCHEDULE: () => handleAddSchedule(msg),
       APPLY_SCHEDULE: () => handleApplySchedule(msg),
       TOGGLE_AUTO_CYCLE: () => handleToggleAutoCycle(msg),
     };
@@ -841,6 +842,31 @@ function handleMessage(ws, raw) {
   } catch (error) {
     console.error(`❌ Error parsing message:`, error.message);
   }
+}
+
+// 🆕 Add schedule for a single group
+function handleAddSchedule(msg) {
+  const { groupName, mode } = msg;
+  console.log(`\n📅 ADD_SCHEDULE received for ${groupName}`);
+
+  const delay = getNextCycleDelay();
+  const nextRunAt = Date.now() + delay * 1000;
+
+  groupSchedules.set(groupName, {
+    nextRunAt,
+    countdown: delay,
+    status: "waiting",
+    isPlaying: false,
+  });
+
+  const hours = Math.floor(delay / 3600);
+  const mins = Math.floor((delay % 3600) / 60);
+  console.log(
+    `✅ Added schedule for ${groupName}: ${hours}h ${mins}m (next run at ${new Date(nextRunAt).toLocaleTimeString()})`,
+  );
+
+  // Broadcast updated schedules to all masters
+  broadcastScheduleUpdate();
 }
 
 // 🆕 Handle bot join
