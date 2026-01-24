@@ -17,8 +17,12 @@ export default function Master() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [selectedGroups, setSelectedGroups] = useState(new Set());
 
+  const [bots, setBots] = useState([]);
+
   const wsRef = useRef(null);
   const groupsRef = useRef([]);
+
+  console.log(bots);
 
   useEffect(() => {
     groupsRef.current = groups;
@@ -52,12 +56,21 @@ export default function Master() {
 
           case "INITIAL_GROUPS":
             console.log("📋 Initial groups:", data.groups);
+
+            console.log("🤖 Initial bots:", data);
+
             setGroups(data.groups);
+            if (data.bots) setBots(data.bots);
+
             // 🆕 Get initial schedules from server
             if (data.schedules) {
               console.log("📅 Initial schedules:", data.schedules);
               setGroupSchedules(data.schedules);
             }
+            break;
+
+          case "BOT_LIST_UPDATE": // 🆕 server broadcast of bots
+            setBots(data.bots || []);
             break;
 
           case "PLAYER_FINISHED":
@@ -66,6 +79,15 @@ export default function Master() {
 
           case "REGENERATION_COMPLETE":
             handleRegenerationComplete(data.groupName);
+
+            wsRef.current.send(
+              JSON.stringify({
+                type: "APPLY_SCHEDULE",
+                mode: "randomize",
+                time: scheduleTime,
+                groupNames: Array.from(data.groupName),
+              }),
+            );
             break;
 
           case "BOT_STATUS_UPDATE":
@@ -148,6 +170,16 @@ export default function Master() {
         if (allFinished) {
           console.log(`\n🎉 ALL PLAYERS IN GROUP ${groupName} FINISHED!`);
           triggerRegeneration(groupName, allPlayerNames);
+
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(
+              JSON.stringify({
+                type: "RELEASE_BOT",
+                groupName: groupName,
+              }),
+            );
+            console.log(`🔓 Sent RELEASE_BOT for group ${groupName}`);
+          }
 
           return {
             ...updated,
@@ -285,6 +317,36 @@ export default function Master() {
     }
   };
 
+  const assignBotToGroup = (groupName) => {
+    // Find available bot
+    const availableBot = bots.find(
+      (bot) => bot.status === "available" && !bot.hasGroup,
+    );
+
+    if (!availableBot) {
+      alert("No available bots!");
+      return;
+    }
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "ASSIGN_BOT",
+          botName: availableBot.botName,
+          groupName: groupName,
+        }),
+      );
+      console.log(
+        `📤 Assigning bot ${availableBot.botName} to group ${groupName}`,
+      );
+    }
+  };
+
+  const handlePlayButton = (groupName) => {
+    sendPlayCommand(groupName);
+    assignBotToGroup(groupName);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
       <div className="max-w-7xl mx-auto">
@@ -330,6 +392,31 @@ export default function Master() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* 🆕 Bots list */}
+        <div className="bg-gray-800 rounded-lg p-6 mb-8">
+          <h2 className="text-xl font-bold mb-4">🤖 Bots ({bots.length})</h2>
+          {bots.length === 0 ? (
+            <p className="text-gray-400 text-sm">No bots connected.</p>
+          ) : (
+            <div className="space-y-2">
+              {bots.map((bot, i) => (
+                <div
+                  key={bot.id || bot.botName || i}
+                  className="flex items-center justify-between bg-gray-750 rounded-lg px-4 py-2"
+                >
+                  <span className="text-sm font-semibold">
+                    {bot.botName || bot.name || "bot"}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {bot.status || "available"}
+                    {bot.groupName ? ` · ${bot.groupName}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 🆕 SCHEDULER CONTROL PANEL */}
@@ -504,7 +591,7 @@ export default function Master() {
 
                       {/* Play Button */}
                       <button
-                        onClick={() => sendPlayCommand(group.name)}
+                        onClick={() => handlePlayButton(group.name)}
                         className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition disabled:opacity-50"
                         disabled={schedule?.isPlaying}
                       >
