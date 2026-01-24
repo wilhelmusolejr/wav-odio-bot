@@ -18,12 +18,7 @@ export default function Player() {
   const [showSetupModal, setShowSetupModal] = useState(true);
   const [playerName, setPlayerName] = useState("");
   const [groupName, setGroupName] = useState("");
-
-  const handleSetupSubmit = ({ username, groupName: group }) => {
-    setPlayerName(username);
-    setGroupName(group);
-    setShowSetupModal(false);
-  };
+  const [totalDuration, setTotalDuration] = useState(0);
 
   // 🔥 Only connect WebSocket after setup is complete
   const wsRef = usePlayerWebSocket({
@@ -39,6 +34,12 @@ export default function Player() {
     onLoadAudio: (audioFiles) => handleLoadAudio(audioFiles),
     onStartPlayback: () => handleStartPlayback(),
   });
+
+  const handleSetupSubmit = ({ username, groupName: group }) => {
+    setPlayerName(username);
+    setGroupName(group);
+    setShowSetupModal(false);
+  };
 
   // Audio player controls
   const {
@@ -85,6 +86,8 @@ export default function Player() {
   if (showSetupModal) {
     return <PlayerSetupModal onSubmit={handleSetupSubmit} />;
   }
+
+  console.log(audioList);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
