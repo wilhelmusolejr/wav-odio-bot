@@ -9,7 +9,7 @@ function App() {
       <Routes>
         <Route path="/master" element={<Master />} />
         <Route path="/player" element={<Player />} />
-        <Route path="/hidemium" element={<Hidemium />} />
+        <Route path="/hidemium/:botName" element={<Hidemium />} />
       </Routes>
     </Router>
   );
