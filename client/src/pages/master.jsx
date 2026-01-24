@@ -22,7 +22,16 @@ export default function Master() {
   const wsRef = useRef(null);
   const groupsRef = useRef([]);
 
-  console.log(bots);
+  let channels = [
+    {
+      name: "Bonk",
+      status: "available",
+    },
+    {
+      name: "Benk",
+      status: "available",
+    },
+  ];
 
   useEffect(() => {
     groupsRef.current = groups;
@@ -80,14 +89,17 @@ export default function Master() {
           case "REGENERATION_COMPLETE":
             handleRegenerationComplete(data.groupName);
 
-            wsRef.current.send(
-              JSON.stringify({
-                type: "APPLY_SCHEDULE",
-                mode: "randomize",
-                time: scheduleTime,
-                groupNames: Array.from(data.groupName),
-              }),
-            );
+            // 🆕 Add new schedule for this group only
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  type: "ADD_SCHEDULE",
+                  groupName: data.groupName,
+                  mode: "randomize",
+                }),
+              );
+              console.log(`📅 Sent ADD_SCHEDULE for ${data.groupName}`);
+            }
             break;
 
           case "BOT_STATUS_UPDATE":

@@ -141,30 +141,30 @@ export default function Hidemium() {
               <div
                 className={`w-3 h-3 rounded-full ${getBotStatusColor()}`}
               ></div>
-              <span className="text-lg font-bold capitalize">{botStatus}</span>
+              <span id="botStatus" className="text-lg font-bold capitalize">
+                {botStatus}
+              </span>
             </span>
           </div>
 
           {/* Group Name - show only if assigned */}
           <div className="mb-6 flex items-center justify-between">
             <span className="text-lg text-gray-300">Assigned Group</span>
-            <span className="text-lg font-bold">
-              {groupName ? `🌐 ${groupName}` : "Not assigned"}
+            <span className="text-lg font-bold" id="groupName">
+              {groupName ? `${groupName}` : "Not assigned"}
             </span>
           </div>
 
           {/* Session Status - show only if bot is working */}
-          {botStatus === "occupied" && (
-            <div className="flex items-center justify-between">
-              <span className="text-lg text-gray-300">Session Status</span>
-              <span className="flex items-center gap-2">
-                <div className={` ${getSessionStatusColor()}`}></div>
-                <span className="text-lg font-bold capitalize">
-                  {sessionStatus}
-                </span>
+          <div className="flex items-center justify-between">
+            <span className="text-lg text-gray-300">Session Status</span>
+            <span className="flex items-center gap-2">
+              <div className={` ${getSessionStatusColor()}`}></div>
+              <span className="text-lg font-bold capitalize" id="sessionStatus">
+                {sessionStatus}
               </span>
-            </div>
-          )}
+            </span>
+          </div>
         </div>
       </div>
     </div>
