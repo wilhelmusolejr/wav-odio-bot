@@ -87,8 +87,6 @@ export default function Player() {
     return <PlayerSetupModal onSubmit={handleSetupSubmit} />;
   }
 
-  console.log(audioList);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-8">
       <div className="max-w-7xl mx-auto">
@@ -110,6 +108,7 @@ export default function Player() {
             isPlaying={isPlaying}
             currentTime={currentTime}
             duration={duration}
+            handleAudioError={handleAudioError}
             audioRef={audioRef}
             onPlayPause={togglePlayPause}
             onTimeUpdate={handleTimeUpdate}
