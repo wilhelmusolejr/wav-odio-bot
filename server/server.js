@@ -779,6 +779,9 @@ async function uploadNewAudios(username) {
 }
 
 /* -------------------- ROUTES -------------------- */
+// Serve frontend
+app.use(express.static(join(__dirname, "dist")));
+
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -786,6 +789,11 @@ app.get("/", (req, res) => {
     connectedClients: clients.size,
     totalGroups: groups.size,
   });
+});
+
+// SPA fallback (IMPORTANT)
+app.get("*", (req, res) => {
+  res.sendFile(join(__dirname, "dist", "index.html"));
 });
 
 /* -------------------- MESSAGE HANDLER -------------------- */
@@ -968,57 +976,6 @@ function handleDisconnect(ws) {
   clients.delete(clientId);
   console.log(`🔌 [Disconnected] ${clientId}`);
 }
-
-// 🆕 Countdown ticker - runs every second
-setInterval(() => {
-  const now = Date.now();
-  let scheduleChanged = false;
-
-  groupSchedules.forEach((schedule, groupName) => {
-    if (schedule.isPlaying) return;
-
-    const remaining = Math.floor((schedule.nextRunAt - now) / 1000);
-
-    if (remaining <= 0) {
-      // Time to trigger play
-      console.log(`⏰ Auto-triggering PLAY_AUDIO for ${groupName}`);
-
-      schedule.status = "speaking";
-      schedule.isPlaying = true;
-      schedule.countdown = 0;
-      scheduleChanged = true;
-
-      // Initialize playing group tracker
-      playingGroups.set(groupName, {
-        totalPlayers: groups.get(groupName)?.players.length || 0,
-        finishedPlayers: new Set(),
-      });
-
-      // Send PLAY_AUDIO command to master
-      wss.clients.forEach((client) => {
-        if (client.role === "master" && client.readyState === WebSocket.OPEN) {
-          client.send(
-            JSON.stringify({
-              type: "AUTO_PLAY_TRIGGERED",
-              groupName: groupName,
-            }),
-          );
-          console.log(`📤 Sent AUTO_PLAY_TRIGGERED to master for ${groupName}`);
-        }
-      });
-    } else {
-      // Update countdown
-      if (schedule.countdown !== remaining) {
-        schedule.countdown = remaining;
-        scheduleChanged = true;
-      }
-    }
-  });
-
-  if (scheduleChanged) {
-    broadcastScheduleUpdate();
-  }
-}, 1000);
 
 /* -------------------- START SERVER -------------------- */
 server.listen(PORT, "0.0.0.0", () => {
