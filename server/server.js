@@ -1,8 +1,3 @@
-import express from "express";
-import { createServer } from "http";
-import { WebSocketServer } from "ws";
-import cors from "cors";
-import dotenv from "dotenv";
 import {
   S3Client,
   ListObjectsV2Command,
@@ -10,6 +5,11 @@ import {
   DeleteObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import express from "express";
+import { createServer } from "http";
+import { WebSocketServer } from "ws";
+import cors from "cors";
+import dotenv from "dotenv";
 import { spawn } from "child_process";
 import { readdir, readFile, unlink } from "fs/promises";
 import { join, dirname } from "path";
@@ -57,7 +57,6 @@ const bots = new Map(); // 🆕 track bots
 let clientIdCounter = 0;
 
 // 🆕 Helper functions for scheduling
-const getInitialDelay = () => Math.floor(Math.random() * 10 * 60); // 0-10 minutes
 const getNextCycleDelay = (min_hour = 1, max_hour = 3) => {
   const minSeconds = min_hour * 3600;
   const maxSeconds = max_hour * 3600;
@@ -607,36 +606,6 @@ async function executeRegenerationWorkflow(groupName, playerNames) {
 }
 
 /* -------------------- AUDIO REGENERATION WORKFLOW -------------------- */
-
-async function handleAudioRegeneration(group) {
-  console.log(`\n═══════════════════════════════════════════════`);
-  console.log(`🔄 AUDIO REGENERATION WORKFLOW STARTED`);
-  console.log(`   Group: ${group.name}`);
-  console.log(`   Players: ${group.players.map((p) => p.name).join(", ")}`);
-  console.log(`═══════════════════════════════════════════════\n`);
-
-  try {
-    // Step 1: Archive current audios for all players
-    for (const player of group.players) {
-      await archivePlayerAudios(player.name);
-    }
-
-    // Step 2: Trigger Python audio generator (simulation)
-    await triggerAudioGenerator(group);
-
-    // Step 3: Upload new audios (simulation)
-    for (const player of group.players) {
-      await uploadNewAudios(player.name);
-    }
-
-    console.log(
-      `\n✅ Audio regeneration workflow completed for group ${group.name}!\n`,
-    );
-  } catch (error) {
-    console.error(`❌ Error in audio regeneration workflow:`, error.message);
-  }
-}
-
 async function archivePlayerAudios(username) {
   console.log(`\n📦 Step 1: Archiving audios for ${username}...`);
 
