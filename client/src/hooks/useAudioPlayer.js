@@ -9,6 +9,46 @@ export function useAudioPlayer({ wsRef, playerName, groupName }) {
   const audioRef = useRef(null);
   const pauseTimeoutRef = useRef(null);
   const audioListRef = useRef([]);
+  const [retryCount, setRetryCount] = useState({});
+  const MAX_RETRIES = 3;
+
+  const handleAudioError = (err) => {
+    const index = currentAudioIndex;
+    const attempts = (retryCount[index] || 0) + 1;
+
+    console.error(
+      `⚠️ Audio failed to load (attempt ${attempts}/${MAX_RETRIES}):`,
+      err?.target?.error,
+    );
+
+    if (attempts < MAX_RETRIES) {
+      // Retry: reload the same audio
+      setRetryCount((prev) => ({
+        ...prev,
+        [index]: attempts,
+      }));
+
+      console.log(`🔄 Retrying audio ${index + 1}...`);
+
+      // Reset audio element and try again
+      if (audioRef.current) {
+        audioRef.current.load();
+      }
+    } else {
+      // Max retries exceeded, skip to next
+      console.error(
+        `❌ Max retries (${MAX_RETRIES}) reached. Skipping to next audio.`,
+      );
+
+      setRetryCount((prev) => {
+        const updated = { ...prev };
+        delete updated[index];
+        return updated;
+      });
+
+      playNextAudio();
+    }
+  };
 
   const handleLoadAudio = (audioFiles) => {
     console.log(`📥 Step 3: Loading ${audioFiles.length} audio files...`);
@@ -184,6 +224,7 @@ export function useAudioPlayer({ wsRef, playerName, groupName }) {
     handleLoadedMetadata,
     handleSeek,
     playNextAudio,
+    handleAudioError,
     cleanup,
   };
 }
