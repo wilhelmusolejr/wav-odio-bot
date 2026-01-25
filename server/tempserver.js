@@ -140,6 +140,7 @@ function handleMessage(ws, raw) {
 
       PLAYER_AUDIO_READY: () => handlePlayerAudioReady(ws, msg), // 🆕 Add this
       PLAY_AUDIO: () => handlePlayAudio(ws, msg),
+      PLAYER_FINISHED: () => handlePlayerFinished(ws, msg), // 🆕 Player finished all audio
     };
 
     const handler = handlers[msg.type];
@@ -171,6 +172,16 @@ function handlePlayAudio(ws, msg) {
   console.log(
     `   Players ready: ${group.players.filter((p) => p.status === "ready").length}/${group.players.length}`,
   );
+
+  // Set group status to speaking
+  group.status = "speaking";
+
+  // Set all players in the group to speaking
+  group.players.forEach((player) => {
+    if (player.status === "ready") {
+      player.status = "speaking";
+    }
+  });
 
   // Notify all players in this group to start playing
   for (const client of wss.clients) {
@@ -594,6 +605,31 @@ function handlePlayerAudioReady(ws, msg) {
   if (player) {
     player.status = "ready";
     console.log(`   ${playerName} status updated to: ready`);
+  }
+
+  // Broadcast updated state to all masters
+  broadcastStateToMasters();
+}
+
+function handlePlayerFinished(ws, msg) {
+  const { playerName, groupName } = msg;
+
+  console.log(`🏁 Player ${playerName} finished playing all audio`);
+
+  // Find group by groupName
+  const group = Array.from(groups.values()).find(
+    (g) => g.groupName === groupName,
+  );
+
+  if (!group) {
+    console.warn(`⚠️ Group not found: ${groupName}`);
+    return;
+  }
+
+  const player = group.players.find((p) => p.name === playerName);
+  if (player) {
+    player.status = "finished";
+    console.log(`   ${playerName} status updated to: finished`);
   }
 
   // Broadcast updated state to all masters

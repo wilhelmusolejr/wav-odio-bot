@@ -108,9 +108,12 @@ export default function GroupCard({ data, onCountdownZero }) {
                       className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
                         player.status === "speaking"
                           ? "bg-blue-500/20 text-blue-400"
-                          : player.status === "finish"
+                          : player.status === "finished" ||
+                              player.status === "finish"
                             ? "bg-green-500/20 text-green-400"
-                            : "bg-yellow-500/20 text-yellow-400"
+                            : player.status === "ready"
+                              ? "bg-purple-500/20 text-purple-400"
+                              : "bg-yellow-500/20 text-yellow-400"
                       }`}
                     >
                       {player.status}

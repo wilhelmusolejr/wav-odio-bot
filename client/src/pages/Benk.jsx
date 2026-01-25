@@ -269,6 +269,18 @@ export default function Benk() {
       setCurrentPlayingIndex(-1);
       setIsPlayingSequence(false);
       console.log("✅ All audios finished playing");
+      
+      // Notify server that player has finished playing all audio
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(
+          JSON.stringify({
+            type: "PLAYER_FINISHED",
+            playerName: DEFAULT_PLAYER_NAME,
+            groupName: DEFAULT_GROUP_NAME,
+          }),
+        );
+        console.log("📤 Sent PLAYER_FINISHED to server");
+      }
       return;
     }
 
