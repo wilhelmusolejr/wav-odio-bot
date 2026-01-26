@@ -782,6 +782,89 @@ async function uploadNewAudios(username) {
 // Serve frontend
 app.use(express.static(join(__dirname, "dist")));
 
+// 🆕 API ROUTES (must come BEFORE the catch-all route)
+app.get("/api/audios/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Username is required",
+      });
+    }
+
+    console.log(`🔍 API: Fetching audios for ${username}`);
+
+    // Get audio files from S3
+    const audioFiles = await getAudioFilesFromS3(username);
+
+    if (audioFiles.length === 0) {
+      return res.status(200).json({
+        username: username,
+        audioCount: 0,
+        audios: [],
+        message: "No audio files found",
+      });
+    }
+
+    res.status(200).json({
+      username: username,
+      audioCount: audioFiles.length,
+      audios: audioFiles.map((file) => ({
+        name: file.name,
+        path: file.url,
+        id: file.id,
+      })),
+    });
+
+    console.log(
+      `✅ API: Returned ${audioFiles.length} audio files for ${username}`,
+    );
+  } catch (error) {
+    console.error(`❌ API Error:`, error.message);
+    res.status(500).json({
+      error: "Failed to fetch audio files",
+      message: error.message,
+    });
+  }
+});
+
+// Alternative: POST endpoint
+app.post("/api/audios", async (req, res) => {
+  try {
+    const { username } = req.body;
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Username is required in request body",
+      });
+    }
+
+    console.log(`🔍 API: POST request for audios - ${username}`);
+
+    const audioFiles = await getAudioFilesFromS3(username);
+
+    res.status(200).json({
+      username: username,
+      audioCount: audioFiles.length,
+      audios: audioFiles.map((file) => ({
+        name: file.name,
+        path: file.url,
+        id: file.id,
+      })),
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`✅ API: Returned ${audioFiles.length} audios for ${username}`);
+  } catch (error) {
+    console.error(`❌ API Error:`, error.message);
+    res.status(500).json({
+      error: "Failed to fetch audio files",
+      message: error.message,
+    });
+  }
+});
+
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
