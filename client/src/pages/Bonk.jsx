@@ -40,9 +40,8 @@ export default function Bonk() {
         switch (msg.type) {
           case "INITIAL_STATE":
           case "STATE_UPDATE":
-            setGroups(msg.groups || []);
+            setGroups(msg.data.groups || []);
             setBots(msg.bots || []);
-
             checkAllPlayersReady(msg.groups || []);
             break;
 

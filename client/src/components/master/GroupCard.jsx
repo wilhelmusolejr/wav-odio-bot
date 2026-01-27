@@ -4,6 +4,8 @@ export default function GroupCard({ data, onCountdownZero }) {
   const [countdown, setCountdown] = useState("00:00:00");
   const triggeredRef = useRef(false);
 
+  console.log(data);
+
   useEffect(() => {
     triggeredRef.current = false;
 
@@ -51,12 +53,11 @@ export default function GroupCard({ data, onCountdownZero }) {
           <div className="flex items-center justify-between mb-1">
             <div className="flex flex-col">
               <h3 className="text-white font-bold text-lg tracking-tight uppercase truncate max-w-[150px]">
-                {data.groupName || "waiting..."}
+                {data.name || "waiting..."}
               </h3>
               {/* Added Channel Name */}
-              <p className="text-blue-400 text-[10px] font-bold uppercase tracking-tight flex items-center gap-1">
-                <span className="opacity-50">#</span>{" "}
-                {data.channelName || "General"}
+              <p className="text-blue-400 text-[10px] font-bold uppercase tracking-tight flex items-center gap-1 hidden">
+                <span className="opacity-50">#</span> {data.status || "General"}
               </p>
             </div>
 
@@ -97,7 +98,7 @@ export default function GroupCard({ data, onCountdownZero }) {
             {data.players && data.players.length > 0 ? (
               data.players.map((player) => (
                 <div
-                  key={player.id}
+                  key={player.name}
                   className="group flex items-center justify-between bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 rounded-md px-3 py-1.5 transition-all cursor-default"
                 >
                   <span className="text-white/70 text-xs font-medium group-hover:text-white transition-colors">
