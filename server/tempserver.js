@@ -253,7 +253,9 @@ async function handlePlayerFinished(wss, ws, msg, data) {
 
     // 2 generate audios for players
     const playerNames = playersCopy.map((p) => p.name);
-    await generateLocalAudio(playerNames, 1);
+
+    let numFiles = Math.floor(Math.random() * 3) + 4;
+    await generateLocalAudio(playerNames, numFiles);
 
     // 3. Upload files to S3
     for (const playerName of playerNames) {
