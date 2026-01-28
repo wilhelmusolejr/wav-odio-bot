@@ -14,6 +14,7 @@ export default function Benk() {
   const [playerName, setPlayerName] = useState("");
   const [showModal, setShowModal] = useState(!playerName);
   const [playerData, setPlayerData] = useState(null);
+  const [groupName, setGroupName] = useState("");
 
   useEffect(() => {
     ws.current = new WebSocket(WS_URL);
@@ -35,15 +36,11 @@ export default function Benk() {
             setShowModal(false);
             setPlayerData(msg.player);
             setPlayerAudios(msg.player.audios || []);
+            setGroupName(msg.player.groupName || DEFAULT_GROUP_NAME);
             break;
-
-          case "AUDIO_LIST":
-            console.log("🎵 Received audio list for player:", msg.playerName);
-            console.log(msg.audios);
 
           case "UPDATE_PLAYERS":
             console.log("🔄 Player data updated");
-
             for (const player of msg.players) {
               console.log(player.name, playerName);
               if (player.name === playerName) {
@@ -52,7 +49,6 @@ export default function Benk() {
                 break;
               }
             }
-
             break;
 
           default:
@@ -112,12 +108,15 @@ export default function Benk() {
           JSON.stringify({
             type: "PLAYER_FINISHED",
             playerName,
-            groupName: DEFAULT_GROUP_NAME,
+            groupName: groupName,
           }),
         );
       }
     }
   }, [selectedAudios, playerAudios, playerName]);
+
+  const getAudioKey = (audio, idx) =>
+    audio.key || audio.id || audio.path || `audio-${idx}`;
 
   const selectedCount = selectedAudios.size;
   const totalCount = playerAudios.length;
@@ -140,6 +139,7 @@ export default function Benk() {
             <form onSubmit={handleSubmitPlayerName} className="space-y-4">
               <input
                 type="text"
+                id="username"
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
                 placeholder="e.g., botfrag666"
@@ -176,9 +176,21 @@ export default function Benk() {
               <p className="text-[11px] uppercase text-white/40 tracking-[0.2em]">
                 Group
               </p>
-              <h2 className="text-2xl font-bold">{DEFAULT_GROUP_NAME}</h2>
-              <p className="text-xs text-blue-400 font-semibold mt-1">
-                #{playerData?.status}
+              <h2 id="groupName" className="text-2xl font-bold">
+                {groupName}
+              </h2>
+              <p
+                id="playerStatus"
+                className="text-xs text-blue-400 font-semibold mt-1"
+              >
+                {playerData?.status}
+              </p>
+              <p>{playerName}</p>
+              <p>
+                Is master?{" "}
+                <span className="" id="initiator">
+                  {playerData?.isMaster ? "true" : "false"}
+                </span>
               </p>
             </div>
             <span className="px-3 py-1 rounded-full bg-white/5 text-white/70 border border-white/10 text-sm">
@@ -193,25 +205,31 @@ export default function Benk() {
               </div>
             )}
 
-            {playerAudios.map((audio, idx) => (
-              <div
-                key={audio.key || audio.path || idx}
-                className="px-4 py-3 hover:bg-white/[0.03] transition-colors flex items-start gap-3"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedAudios.has(audio.key)}
-                  onChange={() => handleCheckboxChange(audio.key)}
-                  className="w-5 h-5 rounded border border-white/30 cursor-pointer accent-indigo-500 mt-0.5"
-                />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-white">{audio.name}</p>
-                  <p className="text-[11px] text-white/40 break-all">
-                    {audio.path}
-                  </p>
+            {playerAudios.map((audio, idx) => {
+              const audioKey = getAudioKey(audio, idx);
+
+              return (
+                <div
+                  key={audioKey}
+                  className="px-4 audio-item py-3 hover:bg-white/[0.03] transition-colors flex items-start gap-3"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedAudios.has(audioKey)}
+                    onChange={() => handleCheckboxChange(audioKey)}
+                    className="w-5 h-5 rounded border border-white/30 cursor-pointer accent-indigo-500 mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-white">
+                      {audio.name}
+                    </p>
+                    <p className="text-[11px] text-white/40 break-all url">
+                      {audio.url}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

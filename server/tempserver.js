@@ -19,7 +19,8 @@ import { readdir, readFile, unlink } from "fs/promises";
 import { spawn } from "child_process";
 
 import { joinPlayer } from "./functions/player.js";
-import { handleRequestAudio } from "./functions/audio.js";
+import { archivePlayerAudios, uploadNewAudios } from "./functions/audio.js";
+import { safeSend } from "./functions/helper.js";
 
 dotenv.config();
 
@@ -33,14 +34,25 @@ groups.push({
   players: [],
   bot: null,
 });
-players.push({
-  playerId: "player_123",
-  name: "Alice",
+groups.push({
+  name: "Bonk",
+  status: "waiting",
+  players: [],
+  bot: null,
 });
-bots.push({
-  name: "BotAlpha",
-  status: "available",
-});
+// player.push({
+//   name: playerName,
+//   type: playerType || "ERROR",
+//   isConnected: true,
+//   status: "waiting",
+// });
+// bots.push({
+//   name: "BotAlpha",
+//   status: "available",
+//   sessionStatus: "idle", // undefined | idle | speaking | done
+//   assignedGroup: null,
+//   isConnected: false,
+// });
 
 let data = {
   groups: groups,
@@ -92,6 +104,8 @@ wss.on("connection", (ws, req) => {
 
       // HANDLERS
       case "JOIN_PLAYER":
+        ws.role = "player";
+        ws.playerName = msg.playerName;
         joinPlayer(wss, ws, msg, data);
         break;
 
@@ -101,14 +115,32 @@ wss.on("connection", (ws, req) => {
         break;
 
       case "JOIN_BOT":
-        // PENDING: validate botName uniqueness
         ws.role = "bot";
         ws.botName = msg.botName || "anonymous-bot";
-        safeSend(ws, { type: "JOIN_SUCCESS", botName: ws.botName });
+
+        let bot = {
+          name: msg.botName,
+          status: "available",
+          sessionStatus: "idle",
+          assignedGroup: null,
+          isConnected: true,
+        };
+
+        data.bots.push(bot);
+        safeSend(ws, { type: "JOIN_SUCCESS", bot: bot });
+
+        broadcastToMasters(wss, {
+          type: "STATE_UPDATE",
+          data: data,
+        });
         break;
 
-      case "REQUEST_AUDIO":
-        handleRequestAudio(ws, msg);
+      case "PLAYER_FINISHED":
+        console.log(
+          `Player finished: ${msg.playerName} in group ${msg.groupName}`,
+        );
+
+        handlePlayerFinished(wss, ws, msg, data);
         break;
 
       default:
@@ -120,17 +152,179 @@ wss.on("connection", (ws, req) => {
   ws.on("error", (err) => console.error("WebSocket error:", err.message));
 });
 
-// Safe send helper
-function safeSend(ws, data) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(data));
-}
-
 function broadcastToMasters(wss, data) {
   wss.clients.forEach((client) => {
     if (client.role === "master" && client.readyState === 1) {
       safeSend(client, data);
     }
   });
+}
+
+async function handlePlayerFinished(wss, ws, msg, data) {
+  // get the group based on the playerName and groupName
+  const group = data.groups.find((g) => g.name === msg.groupName);
+  if (!group) return;
+
+  for (const player of group.players) {
+    if (player.name === msg.playerName) {
+      player.status = "done";
+      break;
+    }
+  }
+
+  // Tell all players in the group their statuses are updated
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "player" &&
+      client.group === group.name &&
+      client.readyState === 1
+    ) {
+      safeSend(client, {
+        type: "UPDATE_PLAYERS",
+        players: group.players,
+      });
+    }
+  });
+
+  // if all players in group are done, set group status to completed
+  if (
+    data.groups
+      .find((g) => g.name === msg.groupName)
+      .players.every((p) => p.status === "done")
+  ) {
+    let group = data.groups.find((g) => g.name === msg.groupName);
+
+    for (const player of group.players) {
+      player.status = "finished";
+    }
+
+    // Tell all players in the group their statuses are updated
+    wss.clients.forEach((client) => {
+      if (
+        client.role === "player" &&
+        client.group === group.name &&
+        client.readyState === 1
+      ) {
+        safeSend(client, {
+          type: "UPDATE_PLAYERS",
+          players: group.players,
+        });
+      }
+    });
+
+    let playersCopy = [...group.players];
+
+    if (group) {
+      group.status = "waiting";
+      group.bot = null;
+      group.players = [];
+    }
+
+    // update bot status
+    for (const bot of data.bots) {
+      if (bot.assignedGroup === msg.groupName) {
+        bot.status = "available";
+        bot.sessionStatus = "done";
+        bot.assignedGroup = null;
+
+        console.log(`Bot ${bot.name} is now available.`);
+
+        wss.clients.forEach((client) => {
+          if (
+            client.role === "bot" &&
+            client.botName === bot.name &&
+            client.readyState === 1
+          ) {
+            safeSend(client, {
+              type: "STATE_UPDATE",
+              bot: bot,
+            });
+          }
+        });
+
+        break;
+      }
+    }
+
+    // 1 archive audios for each player in group
+    for (const player of playersCopy) {
+      await archivePlayerAudios(player.name);
+    }
+
+    // 2 generate audios for players
+    const playerNames = playersCopy.map((p) => p.name);
+    await generateLocalAudio(playerNames, 1);
+
+    // 3. Upload files to S3
+    for (const playerName of playerNames) {
+      await uploadNewAudios(playerName);
+    }
+  }
+
+  broadcastToMasters(wss, {
+    type: "STATE_UPDATE",
+    data: data,
+  });
+}
+
+async function generateLocalAudio(playerNames, numFiles = 1) {
+  try {
+    const pythonScript = path.join(
+      process.cwd(),
+      "..",
+      "new_audio",
+      "conversation.py",
+    );
+
+    console.log(
+      `Running: python ${pythonScript} --usernames ${playerNames.join(" ")} --num-files ${numFiles}`,
+    );
+
+    return new Promise((resolve, reject) => {
+      const python = spawn(
+        "python",
+        [
+          pythonScript,
+          "--usernames",
+          ...playerNames,
+          "--num-files",
+          numFiles.toString(),
+        ],
+        {
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        },
+      );
+
+      let stderr = "";
+      let stdout = "";
+
+      python.stdout.on("data", (data) => {
+        stdout += data.toString();
+        console.log(`[Python stdout]: ${data}`);
+      });
+
+      python.stderr.on("data", (data) => {
+        stderr += data.toString();
+        console.error(`[Python stderr]: ${data}`);
+      });
+
+      python.on("close", (code) => {
+        if (code === 0) {
+          console.log("Audio generation completed successfully");
+          resolve();
+        } else {
+          console.error(`Python script exited with code ${code}`);
+          console.error(`Full stderr output:\n${stderr}`);
+          reject(new Error(`Python script failed: ${stderr}`));
+        }
+      });
+
+      python.on("error", reject);
+    });
+  } catch (error) {
+    console.error("Error generating audio:", error);
+    throw error;
+  }
 }
 
 server.listen(PORT, () => {

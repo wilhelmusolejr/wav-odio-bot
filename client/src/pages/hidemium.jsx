@@ -7,9 +7,9 @@ export default function Hidemium() {
   const { botName } = useParams(); // 🆕 read param
 
   const [connected, setConnected] = useState(false);
-  const [botStatus, setBotStatus] = useState("available"); // 🆕 available | working
+  const [botStatus, setBotStatus] = useState(""); // 🆕 available | working
   const [groupName, setGroupName] = useState(null); // 🆕 assigned by master
-  const [sessionStatus, setSessionStatus] = useState("idle"); // 🆕 speaking | idle | done
+  const [sessionStatus, setSessionStatus] = useState(""); // 🆕 speaking | idle | done
   const wsRef = useRef(null);
 
   // WebSocket connection
@@ -36,6 +36,21 @@ export default function Hidemium() {
         switch (data.type) {
           case "PONG":
             console.log("💓 Heartbeat");
+            break;
+
+          case "JOIN_SUCCESS":
+            setBotStatus(data.bot.status);
+            setSessionStatus(data.bot.sessionStatus);
+            break;
+
+          case "STATE_UPDATE":
+            console.log("🤖 State update received");
+
+            console.log(data);
+
+            setBotStatus(data.bot.status);
+            setSessionStatus(data.bot.sessionStatus);
+            setGroupName(data.bot.assignedGroup);
             break;
 
           case "BOT_ASSIGNED": // Master assigns bot to group

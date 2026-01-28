@@ -1,4 +1,8 @@
+import { isMaster } from "cluster";
+import { getAudioFilesFromS3 } from "./audio.js";
 import { safeSend } from "./helper.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 let accounts = [
   {
@@ -11,7 +15,7 @@ let accounts = [
   },
 ];
 
-export function joinPlayer(wss, ws, msg, data) {
+export async function joinPlayer(wss, ws, msg, data) {
   let { playerName } = msg;
   let playerType;
 
@@ -28,22 +32,12 @@ export function joinPlayer(wss, ws, msg, data) {
     type: playerType || "ERROR",
     isConnected: true,
     status: "waiting",
+    isMaster: false,
   };
 
   // Fetch user audios from DB (mocked here)
-  let audios = [
-    {
-      name: "Sample Audio 1",
-      url: "https://example.com/audio1.mp3",
-      key: "audio1.mp3",
-    },
-    {
-      name: "Sample Audio 2",
-      url: "https://example.com/audio2.mp3",
-      key: "audio2.mp3",
-    },
-  ];
-  player.audios = audios;
+  let audiosFromS3 = await getAudioFilesFromS3(playerName);
+  player.audios = audiosFromS3;
 
   // Assign player to a group (mocked here)
   let assignedGroupId = null;
@@ -61,6 +55,10 @@ export function joinPlayer(wss, ws, msg, data) {
           p.status = "ready";
         });
 
+        // choose random player and set isMaster to true
+        const randomIndex = Math.floor(Math.random() * group.players.length);
+        group.players[randomIndex].isMaster = true;
+
         // --- NEW: TELL EVERYONE IN THIS GROUP THEY ARE READY ---
         wss.clients.forEach((client) => {
           // Find clients who belong to this specific group
@@ -77,6 +75,7 @@ export function joinPlayer(wss, ws, msg, data) {
           if (bot.status === "available") {
             group.bot = bot;
             bot.status = "assigned";
+            bot.assignedGroup = group.name;
             break;
           }
         }
@@ -95,8 +94,23 @@ export function joinPlayer(wss, ws, msg, data) {
           // Find clients who belong to this specific group
           if (client.group === assignedGroupId && client.readyState === 1) {
             safeSend(client, {
-              type: "UPDATE_PLAYERS", // Or "UPDATE_PLAYERS"
+              type: "UPDATE_PLAYERS",
               players: group.players,
+            });
+          }
+        });
+
+        // tell bot to start session
+        wss.clients.forEach((client) => {
+          if (
+            client.role === "bot" &&
+            group.bot &&
+            client.botName === group.bot.name &&
+            client.readyState === 1
+          ) {
+            safeSend(client, {
+              type: "STATE_UPDATE",
+              bot: group.bot,
             });
           }
         });
@@ -107,19 +121,18 @@ export function joinPlayer(wss, ws, msg, data) {
       break;
     }
   }
-  player.groupName = assignedGroupId;
 
-  ws.playerName = playerName;
+  player.groupName = assignedGroupId;
   ws.group = assignedGroupId;
-  ws.role = "player";
+  data.players.push(player);
 
   console.log(`Player joined: ${msg.playerName} as ${playerType}`);
 
+  // BROADCAST UPDATED STATE TO MASTERS
   safeSend(ws, {
     type: "JOIN_SUCCESS",
     player,
   });
-
   broadcastToMasters(wss, {
     type: "STATE_UPDATE",
     data: data,

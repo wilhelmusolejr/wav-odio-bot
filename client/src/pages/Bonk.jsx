@@ -41,7 +41,7 @@ export default function Bonk() {
           case "INITIAL_STATE":
           case "STATE_UPDATE":
             setGroups(msg.data.groups || []);
-            setBots(msg.bots || []);
+            setBots(msg.data.bots || []);
             checkAllPlayersReady(msg.groups || []);
             break;
 
@@ -138,6 +138,7 @@ export default function Bonk() {
   };
 
   console.log("👥 Groups:", groups);
+  console.log("🤖 Bots:", bots);
 
   return (
     <>
@@ -193,14 +194,7 @@ export default function Bonk() {
 
                 {/* Streamlined List */}
                 <div className="divide-y divide-white/5 border-t border-white/5">
-                  {[
-                    { name: "Bot_Fragment_666", state: "recording" },
-                    { name: "Shadow_Voice_01", state: "available" },
-                    { name: "Laham_Slayer_09", state: "break time" },
-                    { name: "Echo_Alpha_Instance", state: "recording" },
-                    { name: "Kita_Dev_Bot", state: "available" },
-                    { name: "Silent_Stalker_X", state: "recording" },
-                  ].map((bot, index) => (
+                  {bots.map((bot, index) => (
                     <div
                       key={index}
                       className="grid grid-cols-2 items-center  py-2.5 hover:bg-white/[0.02] transition-colors group"
@@ -224,7 +218,7 @@ export default function Bonk() {
                           {bot.state === "recording" && (
                             <span className="inline-block w-1 h-1 rounded-full bg-rose-500 animate-pulse mr-1.5 mb-0.5"></span>
                           )}
-                          {bot.state}
+                          {bot.status}
                         </span>
                       </div>
                     </div>
