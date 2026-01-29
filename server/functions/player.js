@@ -44,6 +44,14 @@ export async function joinPlayer(wss, ws, msg, data) {
 
   for (const group of data.groups) {
     if (group.status === "waiting" && group.players.length < 2) {
+      // Check if this group already has a player of the same type
+      const hasSameType = group.players.some((p) => p.type === player.type);
+
+      // Skip this group if it already has a player of the same type
+      if (hasSameType) {
+        continue;
+      }
+
       group.players.push(player);
       assignedGroupId = group.name;
 
@@ -59,12 +67,11 @@ export async function joinPlayer(wss, ws, msg, data) {
         const randomIndex = Math.floor(Math.random() * group.players.length);
         group.players[randomIndex].isMaster = true;
 
-        // --- NEW: TELL EVERYONE IN THIS GROUP THEY ARE READY ---
+        // --- TELL EVERYONE IN THIS GROUP THEY ARE READY ---
         wss.clients.forEach((client) => {
-          // Find clients who belong to this specific group
           if (client.group === assignedGroupId && client.readyState === 1) {
             safeSend(client, {
-              type: "UPDATE_PLAYERS", // Or "UPDATE_PLAYERS"
+              type: "UPDATE_PLAYERS",
               players: group.players,
             });
           }
@@ -89,9 +96,8 @@ export async function joinPlayer(wss, ws, msg, data) {
           p.status = "speaking";
         });
 
-        // --- NEW: TELL EVERYONE IN THIS GROUP THEY ARE SPEAKING ---
+        // --- TELL EVERYONE IN THIS GROUP THEY ARE SPEAKING ---
         wss.clients.forEach((client) => {
-          // Find clients who belong to this specific group
           if (client.group === assignedGroupId && client.readyState === 1) {
             safeSend(client, {
               type: "UPDATE_PLAYERS",
