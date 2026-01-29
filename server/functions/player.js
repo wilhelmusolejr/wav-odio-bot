@@ -64,8 +64,9 @@ export async function joinPlayer(wss, ws, msg, data) {
         });
 
         // choose random player and set isMaster to true
-        const randomIndex = Math.floor(Math.random() * group.players.length);
-        group.players[randomIndex].isMaster = true;
+        const isMasterIndex = Math.random() < 0.5 ? 0 : 1;
+        group.players[0].isMaster = isMasterIndex === 0;
+        group.players[1].isMaster = isMasterIndex === 1;
 
         // --- TELL EVERYONE IN THIS GROUP THEY ARE READY ---
         wss.clients.forEach((client) => {
