@@ -14,6 +14,7 @@ export default function Bonk() {
   const ws = useRef(null);
 
   // WebSocket connection
+  // WebSocket connection
   useEffect(() => {
     // Connect to WebSocket server
     const wsUrl = "ws://localhost:8080/ws";
