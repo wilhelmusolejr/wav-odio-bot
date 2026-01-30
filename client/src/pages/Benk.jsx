@@ -122,128 +122,171 @@ export default function Benk() {
   const totalCount = playerAudios.length;
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-gradient-to-br from-black via-zinc-900 to-black text-white">
+    <div className="relative min-h-screen w-full overflow-hidden bg-gradient-to-br from-black via-zinc-900 to-black text-white font-sans">
       <Orbs />
 
       {/* Player Name Modal */}
       {showModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-sm bg-black/50">
-          <div className="bg-white/10 border border-white/20 rounded-2xl p-8 shadow-2xl max-w-md w-full mx-4 backdrop-blur-md">
-            <h2 className="text-3xl font-bold text-white mb-2">
-              Enter Player Name
-            </h2>
-            <p className="text-white/60 text-sm mb-6">
-              Please enter your player name to continue
-            </p>
+        <div className="fixed inset-0 flex items-center justify-center z-50 backdrop-blur-md bg-black/60 transition-all">
+          <div className="bg-zinc-900/80 border border-white/10 rounded-3xl p-10 shadow-2xl max-w-md w-full mx-4">
+            <div className="mb-8">
+              <h2 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">
+                Welcome
+              </h2>
+              <p className="text-zinc-400 mt-2">
+                Identify yourself to join the session.
+              </p>
+            </div>
 
-            <form onSubmit={handleSubmitPlayerName} className="space-y-4">
-              <input
-                type="text"
-                id="username"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="e.g., botfrag666"
-                list="playerList"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-indigo-500 focus:bg-white/10 transition-colors"
-                autoFocus
-              />
-              <datalist id="playerList">
-                <option value="botfrag666" />
-                <option value="jeroam" />
-              </datalist>
+            <form onSubmit={handleSubmitPlayerName} className="space-y-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  id="username"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="Enter your handle..."
+                  list="playerList"
+                  className="w-full px-5 py-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-lg"
+                  autoFocus
+                />
+                <datalist id="playerList">
+                  <option value="botfrag666" />
+                  <option value="jeroam" />
+                </datalist>
+              </div>
 
               <button
                 type="submit"
                 disabled={!playerName.trim()}
-                className="w-full px-4 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-white/20 disabled:cursor-not-allowed text-white font-semibold transition-colors"
+                className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed font-bold text-lg transition-all shadow-lg shadow-indigo-500/20"
               >
-                Continue
+                Enter Dashboard
               </button>
             </form>
           </div>
         </div>
       )}
 
-      <div className="max-w-6xl mx-auto pt-28 pb-16 px-4">
-        <header className="text-center mb-10">
-          <h1 className="text-5xl font-semibold">Player Dashboard</h1>
-          <p className="text-white/60 mt-2 text-sm">Audio list</p>
+      <div className="max-w-4xl mx-auto pt-20 pb-16 px-6">
+        {/* Header Section */}
+        <header className="flex items-end justify-between mb-12">
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-zinc-500 font-medium">Session Management</p>
+          </div>
+          <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10">
+            <div
+              className={`h-2 w-2 rounded-full ${isConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`}
+            />
+            <span className="text-xs font-bold uppercase tracking-widest text-zinc-300">
+              {isConnected ? "Live" : "Offline"}
+            </span>
+          </div>
         </header>
 
-        <div className="bg-white/5 border border-white/10 rounded-xl p-5 shadow-xl backdrop-blur-md">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div>
-              <p className="text-[11px] uppercase text-white/40 tracking-[0.2em]">
-                Group
-              </p>
-              <h2 id="groupName" className="text-2xl font-bold">
-                {groupName}
-              </h2>
-              <p
-                id="playerStatus"
-                className="text-xs text-blue-400 font-semibold mt-1"
+        {/* Info Card */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-xl">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
+              Current Group
+            </p>
+            <p className="text-xl font-bold truncate">
+              {groupName || "Assigning..."}
+            </p>
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-xl">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
+              Status
+            </p>
+            <div className="flex items-center gap-2">
+              <span
+                className={`text-xl font-bold ${playerData?.status === "ready" ? "text-green-400" : "text-indigo-400"}`}
               >
-                {playerData?.status}
-              </p>
-              <p>{playerName}</p>
-              <p>
-                Is master?{" "}
-                <span className="" id="initiator">
-                  {playerData?.isMaster ? "true" : "false"}
-                </span>
-              </p>
+                {playerData?.status || "Waiting"}
+              </span>
+              {playerData?.status !== "ready" && (
+                <div className="h-1 w-1 bg-indigo-400 rounded-full animate-ping" />
+              )}
             </div>
-            <span className="px-3 py-1 rounded-full bg-white/5 text-white/70 border border-white/10 text-sm">
-              {selectedCount} / {playerAudios.length} audios
+          </div>
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-xl">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
+              Role
+            </p>
+            <p className="text-xl font-bold">
+              {playerData?.isMaster ? "👑 Master" : "👤 Player"}
+            </p>
+          </div>
+        </div>
+
+        {/* Audio List Container */}
+        <div className="bg-zinc-900/50 border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="px-8 py-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+            <h3 className="font-bold text-lg">Audio Library</h3>
+            <span className="text-sm font-medium bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-lg border border-indigo-500/30">
+              {selectedCount} Selected
             </span>
           </div>
 
-          <div className="divide-y divide-white/5 border border-white/5 rounded-lg overflow-hidden">
-            {playerAudios.length === 0 && (
-              <div className="px-4 py-6 text-center text-sm text-white/50">
-                No audio files queued.
+          <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+            {playerAudios.length === 0 ? (
+              <div className="py-20 text-center">
+                <p className="text-zinc-500 italic">
+                  No audio files found in your bucket.
+                </p>
               </div>
+            ) : (
+              playerAudios.map((audio, idx) => {
+                const audioKey = getAudioKey(audio, idx);
+                const isSelected = selectedAudios.has(audioKey);
+
+                return (
+                  <label
+                    key={audioKey}
+                    className={`group flex items-center gap-4 px-8 py-4 cursor-pointer transition-all border-b border-white/5 last:border-0 ${
+                      isSelected ? "bg-indigo-500/10" : "hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="relative flex items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleCheckboxChange(audioKey)}
+                        className="peer sr-only"
+                      />
+                      <div className="h-6 w-6 rounded-md border-2 border-white/20 peer-checked:bg-indigo-500 peer-checked:border-indigo-500 transition-all flex items-center justify-center">
+                        <svg
+                          className={`w-4 h-4 text-white ${isSelected ? "block" : "hidden"}`}
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="3"
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className={`text-sm font-semibold truncate transition-colors ${isSelected ? "text-indigo-300" : "text-zinc-200"}`}
+                      >
+                        {audio.name}
+                      </p>
+                      <p className="text-[10px] text-zinc-500 truncate mt-0.5 group-hover:text-zinc-400 transition-colors">
+                        {audio.url}
+                      </p>
+                    </div>
+                  </label>
+                );
+              })
             )}
-
-            {playerAudios.map((audio, idx) => {
-              const audioKey = getAudioKey(audio, idx);
-
-              return (
-                <div
-                  key={audioKey}
-                  className="px-4 audio-item py-3 hover:bg-white/[0.03] transition-colors flex items-start gap-3"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedAudios.has(audioKey)}
-                    onChange={() => handleCheckboxChange(audioKey)}
-                    className="w-5 h-5 rounded border border-white/30 cursor-pointer accent-indigo-500 mt-0.5"
-                  />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-white">
-                      {audio.name}
-                    </p>
-                    <p className="text-[11px] text-white/40 break-all url">
-                      {audio.url}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
           </div>
-        </div>
-      </div>
-
-      <div className="absolute top-6 right-6">
-        <div className="flex items-center gap-3">
-          <div
-            className={`h-3 w-3 rounded-full ${
-              isConnected ? "bg-green-400" : "bg-red-400"
-            }`}
-          />
-          <p className="uppercase font-medium text-sm">
-            {isConnected ? "Connected" : "Disconnected"}
-          </p>
         </div>
       </div>
     </div>
