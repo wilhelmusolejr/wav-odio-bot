@@ -28,6 +28,10 @@ let groups = [];
 let players = [];
 let bots = [];
 
+// 🔥 Audio generation queue
+let audioGenerationQueue = [];
+let isProcessingAudio = false;
+
 groups.push({
   name: "Benk",
   status: "waiting",
@@ -148,35 +152,65 @@ wss.on("connection", (ws, req) => {
     }
   });
 
-  ws.on("close", () => console.log("Client disconnected"));
+  ws.on("close", () => {
+    handleDisconnect(wss, ws, data);
+    console.log("Client disconnected");
+  });
   ws.on("error", (err) => console.error("WebSocket error:", err.message));
 });
 
-function broadcastToMasters(wss, data) {
-  wss.clients.forEach((client) => {
-    if (client.role === "master" && client.readyState === 1) {
-      safeSend(client, data);
-    }
-  });
-}
-
-async function handlePlayerFinished(wss, ws, msg, data) {
-  // get the group based on the playerName and groupName
-  const group = data.groups.find((g) => g.name === msg.groupName);
-  if (!group) return;
-
-  for (const player of group.players) {
-    if (player.name === msg.playerName) {
-      player.status = "done";
-      break;
-    }
+function handleDisconnect(wss, ws, data) {
+  if (ws.role !== "player") {
+    return;
   }
 
-  // Tell all players in the group their statuses are updated
+  const groupName = ws.group;
+  const playerName = ws.playerName;
+
+  if (!groupName) {
+    return;
+  }
+
+  const group = data.groups.find((g) => g.name === groupName);
+  if (!group) {
+    return;
+  }
+
+  // Remove player from group and global list
+  group.players = group.players.filter((p) => p.name !== playerName);
+  data.players = data.players.filter((p) => p.name !== playerName);
+
+  // Reset group if empty
+  if (group.players.length === 0) {
+    group.status = "waiting";
+    if (group.bot) {
+      const bot = group.bot;
+      bot.status = "available";
+      bot.sessionStatus = "idle";
+      bot.assignedGroup = null;
+
+      wss.clients.forEach((client) => {
+        if (
+          client.role === "bot" &&
+          client.botName === bot.name &&
+          client.readyState === 1
+        ) {
+          safeSend(client, {
+            type: "STATE_UPDATE",
+            bot: bot,
+          });
+        }
+      });
+    }
+
+    group.bot = null;
+  }
+
+  // Notify remaining players in the group
   wss.clients.forEach((client) => {
     if (
       client.role === "player" &&
-      client.group === group.name &&
+      client.group === groupName &&
       client.readyState === 1
     ) {
       safeSend(client, {
@@ -186,87 +220,202 @@ async function handlePlayerFinished(wss, ws, msg, data) {
     }
   });
 
-  // if all players in group are done, set group status to completed
-  if (
-    data.groups
-      .find((g) => g.name === msg.groupName)
-      .players.every((p) => p.status === "done")
-  ) {
-    let group = data.groups.find((g) => g.name === msg.groupName);
+  // Broadcast updated state to masters
+  broadcastToMasters(wss, {
+    type: "STATE_UPDATE",
+    data: data,
+  });
+}
 
-    for (const player of group.players) {
-      player.status = "finished";
+async function handlePlayerFinished(wss, ws, msg, data) {
+  const { playerName, groupName } = msg;
+
+  // Get the group
+  const group = data.groups.find((g) => g.name === groupName);
+  if (!group) {
+    console.error(`Group ${groupName} not found`);
+    return;
+  }
+
+  // Update the specific player's status to "done"
+  const player = group.players.find((p) => p.name === playerName);
+  if (!player) {
+    console.error(`Player ${playerName} not found in group ${groupName}`);
+    return;
+  }
+
+  player.status = "done";
+  console.log(`Player ${playerName} finished in group ${groupName}`);
+
+  // Broadcast updated status to all players in THIS group
+  broadcastToGroup(wss, groupName, {
+    type: "UPDATE_PLAYERS",
+    players: group.players, // Shows current status (some "done", some "speaking")
+  });
+
+  // Check if ALL players in the group are done
+  const allPlayersDone = group.players.every((p) => p.status === "done");
+
+  if (allPlayersDone) {
+    console.log(
+      `All players in group ${groupName} are done. Starting completion process.`,
+    );
+    await handleGroupCompletion(wss, group, data);
+  }
+
+  // Broadcast state update to masters
+  broadcastToMasters(wss, {
+    type: "STATE_UPDATE",
+    data: data,
+  });
+}
+
+/**
+ * Handle group completion when all players finish
+ */
+async function handleGroupCompletion(wss, group, data) {
+  const groupName = group.name;
+
+  // 1. Update all players to "finished" status
+  for (const player of group.players) {
+    player.status = "finished";
+  }
+
+  // 2. ⭐ IMPORTANT: Notify players of "finished" status BEFORE clearing group
+  broadcastToGroup(wss, groupName, {
+    type: "UPDATE_PLAYERS",
+    players: group.players, // Shows all players as "finished"
+  });
+
+  // 3. Keep a copy of players for audio processing
+  const playersCopy = [...group.players];
+
+  // 4. Release the bot assigned to this group
+  releaseBot(wss, group, data);
+
+  // 5. Reset the group to waiting state
+  group.status = "waiting";
+  group.bot = null;
+  group.players = []; // ⚠️ Clear players AFTER sending finished status
+
+  console.log(`Group ${groupName} reset to waiting state`);
+
+  // 6. Add to audio generation queue instead of processing immediately
+  addToAudioQueue(playersCopy, groupName);
+}
+
+/**
+ * Release bot from group assignment
+ */
+function releaseBot(wss, group, data) {
+  if (!group.bot) {
+    return;
+  }
+
+  const bot = data.bots.find((b) => b.assignedGroup === group.name);
+  if (!bot) {
+    return;
+  }
+
+  bot.status = "available";
+  bot.sessionStatus = "done";
+  bot.assignedGroup = null;
+
+  console.log(`Bot ${bot.name} released from group ${group.name}`);
+
+  // Notify the bot of status change
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "bot" &&
+      client.botName === bot.name &&
+      client.readyState === 1
+    ) {
+      safeSend(client, {
+        type: "STATE_UPDATE",
+        bot: bot,
+      });
     }
+  });
+}
 
-    // Tell all players in the group their statuses are updated
-    wss.clients.forEach((client) => {
-      if (
-        client.role === "player" &&
-        client.group === group.name &&
-        client.readyState === 1
-      ) {
-        safeSend(client, {
-          type: "UPDATE_PLAYERS",
-          players: group.players,
-        });
-      }
-    });
+/**
+ * Add audio generation task to queue
+ */
+function addToAudioQueue(players, groupName) {
+  const task = { players, groupName, timestamp: new Date() };
+  audioGenerationQueue.push(task);
 
-    let playersCopy = [...group.players];
+  console.log(`📝 Added audio generation task for group ${groupName} to queue`);
+  console.log(`📊 Queue length: ${audioGenerationQueue.length}`);
 
-    if (group) {
-      group.status = "waiting";
-      group.bot = null;
-      group.players = [];
+  // Start processing if not already running
+  if (!isProcessingAudio) {
+    processAudioQueue();
+  }
+}
+
+/**
+ * Process audio generation queue sequentially
+ */
+async function processAudioQueue() {
+  if (isProcessingAudio || audioGenerationQueue.length === 0) {
+    return;
+  }
+
+  isProcessingAudio = true;
+
+  while (audioGenerationQueue.length > 0) {
+    const task = audioGenerationQueue.shift();
+    const { players, groupName } = task;
+
+    console.log(`\n🎵 Processing audio generation for group: ${groupName}`);
+    console.log(`📊 Remaining in queue: ${audioGenerationQueue.length}`);
+
+    try {
+      await processAudioGeneration(players);
+      console.log(`✅ Audio generation completed for group: ${groupName}`);
+    } catch (error) {
+      console.error(
+        `❌ Audio generation failed for group ${groupName}:`,
+        error,
+      );
     }
+  }
 
-    // update bot status
-    for (const bot of data.bots) {
-      if (bot.assignedGroup === msg.groupName) {
-        bot.status = "available";
-        bot.sessionStatus = "done";
-        bot.assignedGroup = null;
+  isProcessingAudio = false;
+  console.log(`\n✅ Audio generation queue empty`);
+}
 
-        console.log(`Bot ${bot.name} is now available.`);
+/**
+ * Process audio generation for completed group
+ */
+async function processAudioGeneration(players) {
+  try {
+    console.log(`Starting audio generation for ${players.length} players`);
 
-        wss.clients.forEach((client) => {
-          if (
-            client.role === "bot" &&
-            client.botName === bot.name &&
-            client.readyState === 1
-          ) {
-            safeSend(client, {
-              type: "STATE_UPDATE",
-              bot: bot,
-            });
-          }
-        });
-
-        break;
-      }
-    }
-
-    // 1 archive audios for each player in group
-    for (const player of playersCopy) {
+    // 1. Archive existing audios for each player
+    for (const player of players) {
       await archivePlayerAudios(player.name);
     }
 
-    // 2 generate audios for players
-    const playerNames = playersCopy.map((p) => p.name);
+    // 2. Generate new audio files
+    const playerNames = players.map((p) => p.name);
+    const numFiles = 5;
 
-    let numFiles = Math.floor(Math.random() * 3) + 4;
     await generateLocalAudio(playerNames, numFiles);
 
     // 3. Upload files to S3
     for (const playerName of playerNames) {
       await uploadNewAudios(playerName);
     }
-  }
 
-  broadcastToMasters(wss, {
-    type: "STATE_UPDATE",
-    data: data,
-  });
+    console.log(
+      `Audio generation completed for players: ${playerNames.join(", ")}`,
+    );
+  } catch (error) {
+    console.error("Error in processAudioGeneration:", error);
+    throw error;
+  }
 }
 
 async function generateLocalAudio(playerNames, numFiles = 1) {
@@ -327,6 +476,32 @@ async function generateLocalAudio(playerNames, numFiles = 1) {
     console.error("Error generating audio:", error);
     throw error;
   }
+}
+
+/**
+ * Broadcast message to all players in a specific group
+ */
+function broadcastToGroup(wss, groupName, message) {
+  wss.clients.forEach((client) => {
+    if (
+      client.role === "player" &&
+      client.group === groupName &&
+      client.readyState === 1
+    ) {
+      safeSend(client, message);
+    }
+  });
+}
+
+/**
+ * Broadcast message to all master clients
+ */
+function broadcastToMasters(wss, message) {
+  wss.clients.forEach((client) => {
+    if (client.role === "master" && client.readyState === 1) {
+      safeSend(client, message);
+    }
+  });
 }
 
 server.listen(PORT, () => {
