@@ -41,7 +41,7 @@ USER2_DIR = os.path.join(BASE_DIR, "bren")     # Responder
 
 # ==========================
 # Audio Settings
-SR = 8000  # Sample rate (Hz)
+SR = 24000 # Sample rate (Hz)
 
 # Duration Settings (in seconds)
 # Target ~1h20m base + 5-15m flex to match round cycle length
