@@ -1,28 +1,21 @@
 import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
-import cors from "cors";
 import dotenv from "dotenv";
-import fs, { stat } from "fs";
 import path from "path";
-import { promisify } from "util";
-import {
-  S3Client,
-  ListObjectsV2Command,
-  CopyObjectCommand,
-  DeleteObjectCommand,
-  PutObjectCommand,
-} from "@aws-sdk/client-s3";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { readdir, readFile, unlink } from "fs/promises";
 import { spawn } from "child_process";
+import { connectDB } from "./functions/database.js";
 
 import { joinPlayer } from "./functions/player.js";
 import { archivePlayerAudios, uploadNewAudios } from "./functions/audio.js";
 import { safeSend } from "./functions/helper.js";
+import { skipMiddlewareFunction } from "mongoose";
+import { defaultS3HttpAuthSchemeParametersProvider } from "@aws-sdk/client-s3/dist-types/auth/httpAuthSchemeProvider.js";
+import { DeleteBucketLifecycle$ } from "@aws-sdk/client-s3";
+import { kStringMaxLength } from "buffer";
 
 dotenv.config();
+await connectDB();
 
 let groups = [];
 let players = [];
@@ -44,6 +37,7 @@ groups.push({
   players: [],
   bot: null,
 });
+
 // player.push({
 //   name: playerName,
 //   type: playerType || "ERROR",
@@ -57,6 +51,11 @@ groups.push({
 //   assignedGroup: null,
 //   isConnected: false,
 // });
+
+// FETCH DATABASESE IN AUDIO GENERATOR
+// MAKE AUDIO GENERATO ONLY USE USERNAME INPUT AND IT SHOULD FETCH DATA VIA MONGODB
+// BEFORE GENERATING AUDIO FILES, MAKE SURE TO DELETE OLD FILES FIRST (IN LOCAL)
+// THEN BEFORE UPLOADING THE NEWLY GENERATE AUDIOS, MAKE SURE SE 3 FOLDER IS EMPTY EITHER BY ARCHIVING THE OLD FILES OR DELETING IT, THEN UPLOAD NEW FILES TO S3
 
 let data = {
   groups: groups,
