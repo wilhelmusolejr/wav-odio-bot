@@ -9,10 +9,6 @@ import { connectDB } from "./functions/database.js";
 import { joinPlayer } from "./functions/player.js";
 import { archivePlayerAudios, uploadNewAudios } from "./functions/audio.js";
 import { safeSend } from "./functions/helper.js";
-import { skipMiddlewareFunction } from "mongoose";
-import { defaultS3HttpAuthSchemeParametersProvider } from "@aws-sdk/client-s3/dist-types/auth/httpAuthSchemeProvider.js";
-import { DeleteBucketLifecycle$ } from "@aws-sdk/client-s3";
-import { kStringMaxLength } from "buffer";
 
 dotenv.config();
 await connectDB();
