@@ -5,22 +5,44 @@ import dotenv from "dotenv";
 import { connectDB } from "./functions/database.js";
 import { handleMessage, handleDisconnect } from "./handlers.js";
 import { safeSend } from "./utils.js";
+import { Account } from "./models/Account.js";
 
 dotenv.config();
 await connectDB();
 
 const PORT = process.env.PORT || 8080;
 
-// HTTP Server
-const server = createServer((req, res) => {
-  if (req.url === "/") {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("OK");
-  } else {
-    res.writeHead(404);
-    res.end();
+// Express App
+const app = express();
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("OK");
+});
+
+// API: Get accounts by usernames
+app.post("/api/accounts", async (req, res) => {
+  const { usernames } = req.body;
+
+  if (!usernames || !Array.isArray(usernames)) {
+    return res.status(400).json({ error: "usernames must be an array" });
+  }
+
+  try {
+    const accounts = await Account.find(
+      { username: { $in: usernames } },
+      { password: 0 }
+    );
+
+    res.json({ count: accounts.length, accounts });
+  } catch (error) {
+    console.error("Error fetching accounts:", error.message);
+    res.status(500).json({ error: "Failed to fetch accounts" });
   }
 });
+
+// HTTP Server
+const server = createServer(app);
 
 // WebSocket Server
 const wss = new WebSocketServer({ server, path: "/ws" });
