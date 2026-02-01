@@ -2,7 +2,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { state, audioQueue, findGroup, findBotByGroup, getData } from "./state.js";
 import { broadcastToGroup, broadcastToMasters, sendToBot } from "./utils.js";
-import { archivePlayerAudios, uploadNewAudios } from "./functions/audio.js";
+import { deletePlayerAudios, uploadNewAudios } from "./functions/audio.js";
 
 // ===========================
 // BOT SERVICES
@@ -91,7 +91,7 @@ export function removePlayerFromGroup(wss, playerName, groupName) {
 // AUDIO SERVICES
 // ===========================
 
-const PYTHON_SCRIPT = path.join(process.cwd(), "..", "new_audio", "conversation.py");
+const PYTHON_SCRIPT = path.join(process.cwd(), "..", "audio", "audio_generator_improved.py");
 const NUM_FILES = 5;
 
 export function addToAudioQueue(players, groupName) {
@@ -125,16 +125,16 @@ async function processAudioQueue() {
 }
 
 async function processAudioGeneration(players) {
-  // 1. Archive old audios
+  // 1. Delete old S3 audios
   for (const player of players) {
-    await archivePlayerAudios(player.name);
+    await deletePlayerAudios(player.name);
   }
 
-  // 2. Generate new audios
+  // 2. Generate new local audios
   const playerNames = players.map((p) => p.name);
   await generateLocalAudio(playerNames, NUM_FILES);
 
-  // 3. Upload to S3
+  // 3. Upload to S3 (also deletes local files after upload)
   for (const name of playerNames) {
     await uploadNewAudios(name);
   }
@@ -142,23 +142,24 @@ async function processAudioGeneration(players) {
   console.log(`Audio done for: ${playerNames.join(", ")}`);
 }
 
-function generateLocalAudio(playerNames, numFiles) {
-  return new Promise((resolve, reject) => {
-    console.log(`Running: python ${PYTHON_SCRIPT} --usernames ${playerNames.join(" ")}`);
+async function generateLocalAudio(playerNames, numFiles) {
+  for (const username of playerNames) {
+    await new Promise((resolve, reject) => {
+      console.log(`\nStep 2: Generating audio for ${username}...`);
+      console.log(`Running: python ${PYTHON_SCRIPT} ${username} ${numFiles}`);
 
-    const python = spawn("python", [
-      PYTHON_SCRIPT,
-      "--usernames", ...playerNames,
-      "--num-files", numFiles.toString(),
-    ], { env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+      const python = spawn("python", [PYTHON_SCRIPT, username, numFiles.toString()], {
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+      });
 
-    python.stdout.on("data", (d) => console.log(`[Python]: ${d}`));
-    python.stderr.on("data", (d) => console.error(`[Python Error]: ${d}`));
+      python.stdout.on("data", (d) => console.log(`[Python]: ${d.toString().trim()}`));
+      python.stderr.on("data", (d) => console.error(`[Python]: ${d.toString().trim()}`));
 
-    python.on("close", (code) => {
-      code === 0 ? resolve() : reject(new Error(`Python exited with ${code}`));
+      python.on("close", (code) => {
+        code === 0 ? resolve() : reject(new Error(`Python exited with ${code}`));
+      });
+
+      python.on("error", reject);
     });
-
-    python.on("error", reject);
-  });
+  }
 }
