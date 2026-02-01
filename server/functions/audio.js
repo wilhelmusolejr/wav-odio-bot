@@ -7,7 +7,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { fileURLToPath } from "url";
 import { join, dirname } from "path";
-import { readdir, readFile, unlink } from "fs/promises";
+import { readdir, readFile, unlink, rm } from "fs/promises";
+import { existsSync } from "fs";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -139,6 +140,42 @@ export async function uploadNewAudios(username) {
     console.log(`   Upload complete for ${username}`);
   } catch (error) {
     console.error(`   Error uploading audios for ${username}:`, error.message);
+    throw error;
+  }
+}
+
+export async function deleteLocalAudios(username) {
+  console.log(`\n🗑️ Deleting local audios for ${username}...`);
+
+  const outputDir = join(__dirname, "..", "..", "audio", "output", username);
+
+  try {
+    if (!existsSync(outputDir)) {
+      console.log(`   Local folder doesn't exist for ${username}, skipping`);
+      return;
+    }
+
+    const files = await readdir(outputDir);
+    const audioFiles = files.filter(
+      (f) => f.endsWith(".mp3") || f.endsWith(".wav") || f.endsWith(".ogg"),
+    );
+
+    if (audioFiles.length === 0) {
+      console.log(`   No local audio files found for ${username}`);
+      return;
+    }
+
+    console.log(`   Found ${audioFiles.length} local audio files to delete`);
+
+    for (const file of audioFiles) {
+      const filePath = join(outputDir, file);
+      await unlink(filePath);
+      console.log(`   Deleted local: ${file}`);
+    }
+
+    console.log(`   Local delete complete for ${username}`);
+  } catch (error) {
+    console.error(`   Error deleting local audios for ${username}:`, error.message);
     throw error;
   }
 }

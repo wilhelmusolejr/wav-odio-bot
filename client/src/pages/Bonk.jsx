@@ -10,6 +10,13 @@ export default function Bonk() {
   const [isConnected, setIsConnected] = useState(false);
   const playTriggeredRef = useRef(new Set());
 
+  // Audio generation state
+  const [allAccounts, setAllAccounts] = useState([]);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [numAudioFiles, setNumAudioFiles] = useState(5);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState("");
+
   // WebSocket reference
   const ws = useRef(null);
 
@@ -78,6 +85,70 @@ export default function Bonk() {
       }
     };
   }, []);
+
+  // Fetch all accounts for audio generation
+  useEffect(() => {
+    fetch("http://localhost:8080/api/accounts/all")
+      .then((res) => res.json())
+      .then((data) => {
+        setAllAccounts(data.accounts || []);
+      })
+      .catch((err) => console.error("Failed to fetch accounts:", err));
+  }, []);
+
+  // Audio generation handlers
+  const handleUserToggle = (username) => {
+    setSelectedUsers((prev) =>
+      prev.includes(username)
+        ? prev.filter((u) => u !== username)
+        : [...prev, username],
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedUsers.length === allAccounts.length) {
+      setSelectedUsers([]);
+    } else {
+      setSelectedUsers(allAccounts.map((a) => a.username));
+    }
+  };
+
+  const handleGenerateAudio = async () => {
+    if (selectedUsers.length === 0) {
+      setGenerationStatus("Please select at least one user");
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerationStatus(
+      `Starting audio generation for ${selectedUsers.length} user(s)...`,
+    );
+
+    try {
+      const response = await fetch("http://localhost:8080/api/generate-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          usernames: selectedUsers,
+          numFiles: numAudioFiles,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setGenerationStatus(
+          `Audio generation started for: ${selectedUsers.join(", ")}. Check server console for progress.`,
+        );
+      } else {
+        setGenerationStatus(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      setGenerationStatus(`Failed to start generation: ${error.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleUpdateSchedule = (mode, selectedGroups, config) => {
     // Send to server via WebSocket
@@ -148,7 +219,7 @@ export default function Bonk() {
         <Orbs />
 
         {/* WRAPPER */}
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto pb-40">
           {/* heading */}
           <div className="text-white text-center text-7xl font-semibold pt-32 pb-24">
             <h1>Master Control</h1>
@@ -225,6 +296,102 @@ export default function Bonk() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Audio Generation */}
+              <div className="w-full border-t border-white/10 pt-5">
+                {/* header */}
+                <div className="flex items-center justify-between mb-5 border-b border-white/10 pb-2">
+                  <h2 className="text-2xl capitalize font-semibold text-white/90">
+                    Generate Audio
+                  </h2>
+                </div>
+
+                {/* Number of files input */}
+                <div className="mb-4">
+                  <label className="text-xs uppercase font-bold tracking-wider text-white/40 mb-2 block">
+                    Files per user
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={numAudioFiles}
+                    onChange={(e) =>
+                      setNumAudioFiles(
+                        Math.min(
+                          10,
+                          Math.max(1, parseInt(e.target.value) || 1),
+                        ),
+                      )
+                    }
+                    className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/30"
+                  />
+                </div>
+
+                {/* Select all button */}
+                <div className="mb-3">
+                  <button
+                    onClick={handleSelectAll}
+                    className="text-xs text-white/50 hover:text-white/80 transition-colors"
+                  >
+                    {selectedUsers.length === allAccounts.length
+                      ? "Deselect All"
+                      : "Select All"}
+                  </button>
+                </div>
+
+                {/* User checkboxes */}
+                <div className="max-h-40 overflow-y-auto mb-4 space-y-2">
+                  {allAccounts.map((account) => (
+                    <label
+                      key={account.username}
+                      className="flex items-center gap-3 cursor-pointer hover:bg-white/5 p-2 rounded transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.includes(account.username)}
+                        onChange={() => handleUserToggle(account.username)}
+                        className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-0 focus:ring-offset-0"
+                      />
+                      <span className="text-sm text-white/70">
+                        {account.username}
+                        {account.discordName && (
+                          <span className="text-white/30 ml-2">
+                            ({account.discordName})
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Generate button */}
+                <button
+                  onClick={handleGenerateAudio}
+                  disabled={isGenerating || selectedUsers.length === 0}
+                  className={`w-full py-3 rounded font-semibold text-sm uppercase tracking-wider transition-all ${
+                    isGenerating || selectedUsers.length === 0
+                      ? "bg-white/10 text-white/30 cursor-not-allowed"
+                      : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  }`}
+                >
+                  {isGenerating ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      Generating...
+                    </span>
+                  ) : (
+                    `Generate Audio (${selectedUsers.length} selected)`
+                  )}
+                </button>
+
+                {/* Status message */}
+                {generationStatus && (
+                  <p className="mt-3 text-xs text-white/50 text-center">
+                    {generationStatus}
+                  </p>
+                )}
               </div>
             </div>
           </div>

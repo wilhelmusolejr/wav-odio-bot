@@ -125,6 +125,24 @@ const multipleAccounts = [
     backgroundNoise: "none",
     playerType: "initiator",
   },
+  {
+    username: "jeroam",
+    email: "jerome.poal@hotmail.com",
+    password: "",
+    discordName: "titenijeroammabango",
+    voiceType: "ai_kael",
+    backgroundNoise: "white_noise",
+    playerType: "initiator",
+  },
+  {
+    username: "koooooalaid",
+    email: "brendan.eich666@gmail.com",
+    password: "",
+    discordName: "koooooalaid",
+    voiceType: "real_brendan666",
+    backgroundNoise: "none",
+    playerType: "respondent",
+  },
 ];
 
 addMultipleAccounts(multipleAccounts)
