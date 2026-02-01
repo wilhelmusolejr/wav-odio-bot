@@ -172,34 +172,43 @@ def generate_audio_job(username: str, voice_type: str, bg_noise: str, version: i
 def fetch_user_config(username: str) -> Optional[Dict[str, Any]]:
     """Fetch user configuration from API."""
     try:
-        url = f"{API_BASE_URL}/api/user/{username}"
-        logger.info(f"Fetching config from: {url}")
-        
-        response = requests.get(url, timeout=API_TIMEOUT)
-        
+        url = f"{API_BASE_URL}/api/accounts"
+        logger.info(f"Fetching config for: {username}")
+
+        response = requests.post(
+            url,
+            json={"usernames": [username]},
+            headers={"Content-Type": "application/json"},
+            timeout=API_TIMEOUT
+        )
+
         if response.status_code == 200:
             data = response.json()
-            logger.info(f"✓ Found config for user: {username}")
-            return {
-                "voice_type": data.get("voiceType", "real_brendan666"),
-                "background_noise": data.get("backgroundNoise", "none"),
-                "player_type": data.get("playerType", "player"),
-                "discord_name": data.get("discordName", username)
-            }
-        elif response.status_code == 404:
-            logger.warning(f"✗ User '{username}' not found in database")
-            return None
+            accounts = data.get("accounts", [])
+
+            if accounts:
+                account = accounts[0]
+                logger.info(f"Found config for user: {username}")
+                return {
+                    "voice_type": account.get("voiceType", "real_brendan666"),
+                    "background_noise": account.get("backgroundNoise", "none"),
+                    "player_type": account.get("playerType", "player"),
+                    "discord_name": account.get("discordName", username)
+                }
+            else:
+                logger.warning(f"User '{username}' not found in database")
+                return None
         else:
             logger.error(f"API error: {response.status_code}")
             return None
     except requests.exceptions.ConnectionError:
-        logger.error(f"✗ Cannot connect to API at {API_BASE_URL}")
+        logger.error(f"Cannot connect to API at {API_BASE_URL}")
         return None
     except requests.exceptions.Timeout:
-        logger.error(f"✗ API request timeout after {API_TIMEOUT}s")
+        logger.error(f"API request timeout after {API_TIMEOUT}s")
         return None
     except Exception as e:
-        logger.error(f"✗ Error fetching config: {e}")
+        logger.error(f"Error fetching config: {e}")
         return None
 
 # ==========================

@@ -2,7 +2,6 @@ import { safeSend } from "./helper.js";
 import {
   S3Client,
   ListObjectsV2Command,
-  CopyObjectCommand,
   DeleteObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -42,7 +41,7 @@ export async function getAudioFilesFromS3(username) {
 
     // Filter only audio files and create URLs
     const audioFiles = response.Contents.filter(
-      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav"),
+      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
     ).map((obj, index) => ({
       id: index + 1,
       name: obj.Key.split("/").pop(), // Get filename
@@ -57,11 +56,10 @@ export async function getAudioFilesFromS3(username) {
   }
 }
 
-export async function archivePlayerAudios(username) {
-  console.log(`\n📦 Step 1: Archiving audios for ${username}...`);
+export async function deletePlayerAudios(username) {
+  console.log(`\n🗑️ Step 1: Deleting S3 audios for ${username}...`);
 
   try {
-    // List all current audio files
     const listCommand = new ListObjectsV2Command({
       Bucket: BUCKET_NAME,
       Prefix: `audios/current/${username}/`,
@@ -70,105 +68,77 @@ export async function archivePlayerAudios(username) {
     const response = await s3.send(listCommand);
 
     if (!response.Contents || response.Contents.length === 0) {
-      console.log(`   ⚠️ No audio files found for ${username}`);
+      console.log(`   No existing audio files for ${username}`);
       return;
     }
 
     const audioFiles = response.Contents.filter(
-      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav"),
+      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
     );
 
-    console.log(`   📁 Found ${audioFiles.length} audio files to archive`);
+    console.log(`   Found ${audioFiles.length} audio files to delete`);
 
-    // Copy each file to archive
     for (const file of audioFiles) {
-      const fileName = file.Key.split("/").pop();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const archiveKey = `audios/archive/${username}/${timestamp}_${fileName}`;
-
-      // Copy to archive
-      const copyCommand = new CopyObjectCommand({
-        Bucket: BUCKET_NAME,
-        CopySource: `${BUCKET_NAME}/${file.Key}`,
-        Key: archiveKey,
-      });
-
-      await s3.send(copyCommand);
-      console.log(`   ✅ Archived: ${fileName} → ${archiveKey}`);
-
-      // Delete from current
       const deleteCommand = new DeleteObjectCommand({
         Bucket: BUCKET_NAME,
         Key: file.Key,
       });
 
       await s3.send(deleteCommand);
-      console.log(`   🗑️ Deleted from current: ${file.Key}`);
+      console.log(`   Deleted: ${file.Key}`);
     }
 
-    console.log(`   ✅ Archiving complete for ${username}`);
+    console.log(`   Delete complete for ${username}`);
   } catch (error) {
-    console.error(
-      `   ❌ Error archiving audios for ${username}:`,
-      error.message,
-    );
+    console.error(`   Error deleting audios for ${username}:`, error.message);
     throw error;
   }
 }
 
 export async function uploadNewAudios(username) {
-  console.log(`\n☁️ Step 3: Uploading new audios for ${username}...`);
+  console.log(`\nStep 3: Uploading new audios for ${username}...`);
 
-  const outputDir = join(
-    __dirname,
-    "..",
-    "..",
-    "new_audio",
-    "output",
-    username,
-  );
+  const outputDir = join(__dirname, "..", "..", "audio", "output", username);
 
   try {
-    // Read all files from the output directory
     const files = await readdir(outputDir);
     const audioFiles = files.filter(
-      (f) => f.endsWith(".mp3") || f.endsWith(".wav"),
+      (f) => f.endsWith(".mp3") || f.endsWith(".wav") || f.endsWith(".ogg"),
     );
 
     if (audioFiles.length === 0) {
-      console.log(`   ⚠️ No audio files found in ${outputDir}`);
+      console.log(`   No audio files found in ${outputDir}`);
       return;
     }
 
-    console.log(`   📁 Found ${audioFiles.length} audio file(s) to upload`);
+    console.log(`   Found ${audioFiles.length} audio file(s) to upload`);
 
     for (const file of audioFiles) {
       const filePath = join(outputDir, file);
       const fileContent = await readFile(filePath);
       const s3Key = `audios/current/${username}/${file}`;
 
-      // Upload to S3
+      let contentType = "audio/mpeg";
+      if (file.endsWith(".wav")) contentType = "audio/wav";
+      if (file.endsWith(".ogg")) contentType = "audio/ogg";
+
       const uploadCommand = new PutObjectCommand({
         Bucket: BUCKET_NAME,
         Key: s3Key,
         Body: fileContent,
-        ContentType: file.endsWith(".mp3") ? "audio/mpeg" : "audio/wav",
+        ContentType: contentType,
       });
 
       await s3.send(uploadCommand);
-      console.log(`   ✅ Uploaded: ${file} → ${s3Key}`);
+      console.log(`   Uploaded: ${file} -> ${s3Key}`);
 
-      // Delete local file after successful upload
       await unlink(filePath);
-      console.log(`   🗑️ Deleted local: ${filePath}`);
+      console.log(`   Deleted local: ${file}`);
     }
 
-    console.log(`   ✅ Upload complete for ${username}`);
+    console.log(`   Upload complete for ${username}`);
   } catch (error) {
-    console.error(
-      `   ❌ Error uploading audios for ${username}:`,
-      error.message,
-    );
+    console.error(`   Error uploading audios for ${username}:`, error.message);
     throw error;
   }
 }

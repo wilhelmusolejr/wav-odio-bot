@@ -1,29 +1,26 @@
 import { isMaster } from "cluster";
 import { getAudioFilesFromS3 } from "./audio.js";
 import { safeSend } from "./helper.js";
+import { Account } from "../models/Account.js";
 import dotenv from "dotenv";
 dotenv.config();
-
-let accounts = [
-  {
-    username: "botfrag666",
-    type: "initiator",
-  },
-  {
-    username: "jeroam",
-    type: "respondent",
-  },
-];
 
 export async function joinPlayer(wss, ws, msg, data) {
   let { playerName } = msg;
   let playerType;
 
-  for (const account of accounts) {
-    if (account.username === playerName) {
-      playerType = account.type;
-      break;
+  // Fetch user from database
+  try {
+    const account = await Account.findOne({ username: playerName });
+    if (account) {
+      playerType = account.playerType;
+    } else {
+      console.warn(`User '${playerName}' not found in database`);
+      playerType = "ERROR";
     }
+  } catch (error) {
+    console.error(`Error fetching user '${playerName}':`, error);
+    playerType = "ERROR";
   }
 
   // Player data
