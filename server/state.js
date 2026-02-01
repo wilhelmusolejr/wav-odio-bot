@@ -6,6 +6,8 @@ export const state = {
   groups: [
     { name: "Benk", status: "waiting", players: [], bot: null },
     { name: "Bonk", status: "waiting", players: [], bot: null },
+    { name: "Wonk", status: "waiting", players: [], bot: null },
+    { name: "Ponk", status: "waiting", players: [], bot: null },
   ],
   players: [],
   bots: [],

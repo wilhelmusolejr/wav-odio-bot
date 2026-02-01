@@ -191,7 +191,7 @@ export default function Benk() {
             <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
               Current Group
             </p>
-            <p className="text-xl font-bold truncate">
+            <p id="groupName" className="text-xl font-bold truncate">
               {groupName || "Assigning..."}
             </p>
           </div>
@@ -201,6 +201,7 @@ export default function Benk() {
             </p>
             <div className="flex items-center gap-2">
               <span
+                id="playerStatus"
                 className={`text-xl font-bold ${playerData?.status === "ready" ? "text-green-400" : "text-indigo-400"}`}
               >
                 {playerData?.status || "Waiting"}
@@ -214,7 +215,7 @@ export default function Benk() {
             <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 mb-1">
               Role
             </p>
-            <p className="text-xl font-bold">
+            <p className="text-xl font-bold" id="initiator">
               {playerData?.isMaster ? "👑 Master" : "👤 Player"}
             </p>
           </div>
@@ -272,13 +273,13 @@ export default function Benk() {
                       </div>
                     </div>
 
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 audio-item">
                       <p
                         className={`text-sm font-semibold truncate transition-colors ${isSelected ? "text-indigo-300" : "text-zinc-200"}`}
                       >
                         {audio.name}
                       </p>
-                      <p className="text-[10px] text-zinc-500 truncate mt-0.5 group-hover:text-zinc-400 transition-colors">
+                      <p className="text-[10px] text-zinc-500 truncate mt-0.5 group-hover:text-zinc-400 transition-colors url ">
                         {audio.url}
                       </p>
                     </div>
