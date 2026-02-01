@@ -19,15 +19,34 @@ AUDIOS_PER_USER = 8
 
 def run_generation():
     script_dir = Path(__file__).resolve().parent
-    main_py = script_dir / "main.py"
+    generator_py = script_dir / "audio_generator_improved.py"
+    
+    if not generator_py.exists():
+        print(f"❌ Error: {generator_py} not found")
+        sys.exit(1)
+    
+    print(f"🎵 Audio Generation Started")
+    print(f"=" * 60)
+    print(f"Users: {', '.join(USERNAMES)}")
+    print(f"Files per user: {AUDIOS_PER_USER}")
+    print(f"=" * 60)
+    print()
 
-    config = [{"username": u, "audios": AUDIOS_PER_USER} for u in USERNAMES]
-    payload = json.dumps(config)
-
-    cmd = [sys.executable, str(main_py), payload]
-
-    print(f"Running: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    for i, username in enumerate(USERNAMES, 1):
+        print(f"[{i}/{len(USERNAMES)}] Processing: {username}")
+        
+        cmd = [sys.executable, str(generator_py), username, str(AUDIOS_PER_USER)]
+        
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=False)
+            print(f"✓ Completed: {username}\n")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed: {username} (Exit code: {e.returncode})\n")
+            continue
+    
+    print(f"=" * 60)
+    print(f"✅ All audio generation jobs completed!")
+    print(f"=" * 60)
 
 
 if __name__ == "__main__":
