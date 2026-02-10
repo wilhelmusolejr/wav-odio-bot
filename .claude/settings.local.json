@@ -6,7 +6,8 @@
       "Bash(curl:*)",
       "Bash(python -c:*)",
       "Bash(netstat:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(del \"c:\\\\Users\\\\Asus Rog Flow X16\\\\Desktop\\\\New folder\\\\nul\")"
     ]
   }
 }

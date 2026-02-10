@@ -91,10 +91,10 @@ export default function GroupCard({ data, onCountdownZero }) {
               Players
             </p>
             <p className="text-[12px] text-white/60 font-mono">
-              {data.players?.length || 0} / {data.players?.length || 0}
+              {data.players?.length || 0} / 5
             </p>
           </div>
-          <div className="h-32 overflow-y-auto space-y-1.5 custom-scrollbar">
+          <div className="min-h-32 space-y-1.5">
             {data.players && data.players.length > 0 ? (
               data.players.map((player) => (
                 <div

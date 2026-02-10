@@ -99,49 +99,13 @@ addAccount(newAccount)
 // Multiple accounts (uncomment to use)
 const multipleAccounts = [
   {
-    username: "l3br0ne_53581",
-    email: "wilhelmus.morales@gmail.com",
-    password: "",
-    discordName: "L3bR0nE",
+    username: "jonathanmclopez",
+    email: "jonathanmclopez@gmail.com",
+    password: "Qw09058222!",
+    discordName: "diebong",
     voiceType: "ai_kael",
     backgroundNoise: "white_noise",
     playerType: "initiator",
-  },
-  {
-    username: "johnyhalol",
-    email: "johnyhalol@gmail.com",
-    password: "",
-    discordName: "habebeoi",
-    voiceType: "ai_kael",
-    backgroundNoise: "fan",
-    playerType: "initiator",
-  },
-  {
-    username: "reynaldomabinises",
-    email: "reynaldomabinises@gmail.com",
-    password: "",
-    discordName: "Reynardo",
-    voiceType: "ai_kael",
-    backgroundNoise: "none",
-    playerType: "initiator",
-  },
-  {
-    username: "jeroam",
-    email: "jerome.poal@hotmail.com",
-    password: "",
-    discordName: "titenijeroammabango",
-    voiceType: "ai_kael",
-    backgroundNoise: "white_noise",
-    playerType: "initiator",
-  },
-  {
-    username: "koooooalaid",
-    email: "brendan.eich666@gmail.com",
-    password: "",
-    discordName: "koooooalaid",
-    voiceType: "real_brendan666",
-    backgroundNoise: "none",
-    playerType: "respondent",
   },
 ];
 

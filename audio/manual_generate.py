@@ -5,16 +5,12 @@ from pathlib import Path
 
 # Usernames to generate audio for
 USERNAMES = [
-    "totoyoymonaxia",
-    "paraximonaxi",
-    "koooooalaid",
-    "botfrag666",
     "echogreg",
-    "elooo2092",
+    "reynaldomabinises",
 ]
 
 # Number of audio files to generate per username
-AUDIOS_PER_USER = 8
+AUDIOS_PER_USER = 5
 
 
 def run_generation():

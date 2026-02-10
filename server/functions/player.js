@@ -7,26 +7,26 @@ dotenv.config();
 
 export async function joinPlayer(wss, ws, msg, data) {
   let { playerName } = msg;
-  let playerType;
+  let voiceType;
 
   // Fetch user from database
   try {
     const account = await Account.findOne({ username: playerName });
     if (account) {
-      playerType = account.playerType;
+      voiceType = account.voiceType;
     } else {
       console.warn(`User '${playerName}' not found in database`);
-      playerType = "ERROR";
+      voiceType = "ERROR";
     }
   } catch (error) {
     console.error(`Error fetching user '${playerName}':`, error);
-    playerType = "ERROR";
+    voiceType = "ERROR";
   }
 
   // Player data
   let player = {
     name: playerName,
-    type: playerType || "ERROR",
+    voiceType: voiceType || "ERROR",
     isConnected: true,
     status: "waiting",
     isMaster: false,
@@ -40,20 +40,12 @@ export async function joinPlayer(wss, ws, msg, data) {
   let assignedGroupId = null;
 
   for (const group of data.groups) {
-    if (group.status === "waiting" && group.players.length < 2) {
-      // Check if this group already has a player of the same type
-      const hasSameType = group.players.some((p) => p.type === player.type);
-
-      // Skip this group if it already has a player of the same type
-      if (hasSameType) {
-        continue;
-      }
-
+    if (group.status === "waiting" && group.players.length < 5) {
       group.players.push(player);
       assignedGroupId = group.name;
 
       // Update group status if it's now full
-      if (group.players.length === 2) {
+      if (group.players.length === 5) {
         group.status = "occupied";
 
         group.players.forEach((p) => {
@@ -61,9 +53,10 @@ export async function joinPlayer(wss, ws, msg, data) {
         });
 
         // choose random player and set isMaster to true
-        const isMasterIndex = Math.random() < 0.5 ? 0 : 1;
-        group.players[0].isMaster = isMasterIndex === 0;
-        group.players[1].isMaster = isMasterIndex === 1;
+        const isMasterIndex = Math.floor(Math.random() * group.players.length);
+        group.players.forEach((p, i) => {
+          p.isMaster = i === isMasterIndex;
+        });
 
         // --- TELL EVERYONE IN THIS GROUP THEY ARE READY ---
         wss.clients.forEach((client) => {
@@ -126,11 +119,32 @@ export async function joinPlayer(wss, ws, msg, data) {
     }
   }
 
+  // If no available group, assign to a random group as non-master
+  if (!assignedGroupId) {
+    const randomIndex = Math.floor(Math.random() * data.groups.length);
+    const randomGroup = data.groups[randomIndex];
+    randomGroup.players.push(player);
+    assignedGroupId = randomGroup.name;
+    player.isMaster = false;
+    player.status = randomGroup.status === "waiting" ? "waiting" : "speaking";
+    console.log(`No available group. Assigned ${playerName} to random group ${assignedGroupId}`);
+
+    // Notify group members about the new player
+    wss.clients.forEach((client) => {
+      if (client.group === assignedGroupId && client.readyState === 1) {
+        safeSend(client, {
+          type: "UPDATE_PLAYERS",
+          players: randomGroup.players,
+        });
+      }
+    });
+  }
+
   player.groupName = assignedGroupId;
   ws.group = assignedGroupId;
   data.players.push(player);
 
-  console.log(`Player joined: ${msg.playerName} as ${playerType}`);
+  console.log(`Player joined: ${msg.playerName} with voice ${voiceType}`);
 
   // BROADCAST UPDATED STATE TO MASTERS
   safeSend(ws, {

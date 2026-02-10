@@ -24,36 +24,46 @@ export const s3 = new S3Client({
   },
 });
 
-export async function getAudioFilesFromS3(username) {
-  try {
-    console.log(`🔍 Fetching audio files for: ${username}`);
+export async function getAudioFilesFromS3(username, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔍 Fetching audio files for: ${username} (attempt ${attempt}/${maxRetries})`);
 
-    const command = new ListObjectsV2Command({
-      Bucket: BUCKET_NAME,
-      Prefix: `audios/current/${username}/`,
-    });
+      const command = new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: `audios/current/${username}/`,
+      });
 
-    const response = await s3.send(command);
+      const response = await s3.send(command);
 
-    if (!response.Contents || response.Contents.length === 0) {
-      console.warn(`⚠️ No audio files found for ${username}`);
-      return [];
+      if (!response.Contents || response.Contents.length === 0) {
+        console.warn(`⚠️ No audio files found for ${username}`);
+        return [];
+      }
+
+      // Filter only audio files and create URLs
+      const audioFiles = response.Contents.filter(
+        (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
+      ).map((obj, index) => ({
+        id: index + 1,
+        name: obj.Key.split("/").pop(), // Get filename
+        url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
+      }));
+
+      console.log(`✅ Found ${audioFiles.length} audio files for ${username}`);
+      return audioFiles;
+    } catch (error) {
+      console.error(`❌ Attempt ${attempt}/${maxRetries} failed for ${username}:`, error.message);
+
+      if (attempt < maxRetries) {
+        const delay = attempt * 1000; // 1s, 2s, 3s backoff
+        console.log(`⏳ Retrying in ${delay / 1000}s...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        console.error(`❌ All ${maxRetries} attempts failed for ${username}`);
+        return [];
+      }
     }
-
-    // Filter only audio files and create URLs
-    const audioFiles = response.Contents.filter(
-      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
-    ).map((obj, index) => ({
-      id: index + 1,
-      name: obj.Key.split("/").pop(), // Get filename
-      url: `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${obj.Key}`,
-    }));
-
-    console.log(`✅ Found ${audioFiles.length} audio files for ${username}`);
-    return audioFiles;
-  } catch (error) {
-    console.error(`❌ Error fetching audio from S3:`, error.message);
-    return [];
   }
 }
 
