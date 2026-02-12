@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const NO_PLAYER = parseInt(process.env.NO_PLAYER) || 5;
-const NO_AUDIO = parseInt(process.env.NO_PLAYER) || 5;
+const NO_AUDIO = parseInt(process.env.NO_AUDIO) || 5;
 
 export async function joinPlayer(wss, ws, msg, data) {
   let { playerName } = msg;
