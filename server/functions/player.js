@@ -1,9 +1,12 @@
 import { isMaster } from "cluster";
-import { getAudioFilesFromS3 } from "./audio.js";
+import { getAudioFilesFromS3, getRandomAudioFiles } from "./audio.js";
 import { safeSend } from "./helper.js";
 import { Account } from "../models/Account.js";
 import dotenv from "dotenv";
 dotenv.config();
+
+const NO_PLAYER = parseInt(process.env.NO_PLAYER) || 5;
+const NO_AUDIO = parseInt(process.env.NO_PLAYER) || 5;
 
 export async function joinPlayer(wss, ws, msg, data) {
   let { playerName } = msg;
@@ -33,19 +36,19 @@ export async function joinPlayer(wss, ws, msg, data) {
   };
 
   // Fetch user audios from DB (mocked here)
-  let audiosFromS3 = await getAudioFilesFromS3(playerName);
+  let audiosFromS3 = await getRandomAudioFiles(playerName, NO_AUDIO);
   player.audios = audiosFromS3;
 
   // Assign player to a group (mocked here)
   let assignedGroupId = null;
 
   for (const group of data.groups) {
-    if (group.status === "waiting" && group.players.length < 5) {
+    if (group.status === "waiting" && group.players.length < NO_PLAYER) {
       group.players.push(player);
       assignedGroupId = group.name;
 
       // Update group status if it's now full
-      if (group.players.length === 5) {
+      if (group.players.length === NO_PLAYER) {
         group.status = "occupied";
 
         group.players.forEach((p) => {
@@ -127,7 +130,9 @@ export async function joinPlayer(wss, ws, msg, data) {
     assignedGroupId = randomGroup.name;
     player.isMaster = false;
     player.status = randomGroup.status === "waiting" ? "waiting" : "speaking";
-    console.log(`No available group. Assigned ${playerName} to random group ${assignedGroupId}`);
+    console.log(
+      `No available group. Assigned ${playerName} to random group ${assignedGroupId}`,
+    );
 
     // Notify group members about the new player
     wss.clients.forEach((client) => {
