@@ -15,6 +15,7 @@ dotenv.config();
 const BUCKET_NAME = process.env.AWS_BUCKET_NAME;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const NO_AUDIO = parseInt(process.env.NO_PLAYER) || 5;
 
 export const s3 = new S3Client({
   region: process.env.AWS_REGION,
@@ -27,7 +28,9 @@ export const s3 = new S3Client({
 export async function getAudioFilesFromS3(username, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔍 Fetching audio files for: ${username} (attempt ${attempt}/${maxRetries})`);
+      console.log(
+        `🔍 Fetching audio files for: ${username} (attempt ${attempt}/${maxRetries})`,
+      );
 
       const command = new ListObjectsV2Command({
         Bucket: BUCKET_NAME,
@@ -43,7 +46,10 @@ export async function getAudioFilesFromS3(username, maxRetries = 3) {
 
       // Filter only audio files and create URLs
       const audioFiles = response.Contents.filter(
-        (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
+        (obj) =>
+          obj.Key.endsWith(".mp3") ||
+          obj.Key.endsWith(".wav") ||
+          obj.Key.endsWith(".ogg"),
       ).map((obj, index) => ({
         id: index + 1,
         name: obj.Key.split("/").pop(), // Get filename
@@ -53,7 +59,10 @@ export async function getAudioFilesFromS3(username, maxRetries = 3) {
       console.log(`✅ Found ${audioFiles.length} audio files for ${username}`);
       return audioFiles;
     } catch (error) {
-      console.error(`❌ Attempt ${attempt}/${maxRetries} failed for ${username}:`, error.message);
+      console.error(
+        `❌ Attempt ${attempt}/${maxRetries} failed for ${username}:`,
+        error.message,
+      );
 
       if (attempt < maxRetries) {
         const delay = attempt * 1000; // 1s, 2s, 3s backoff
@@ -65,6 +74,25 @@ export async function getAudioFilesFromS3(username, maxRetries = 3) {
       }
     }
   }
+}
+
+export async function getRandomAudioFiles(username, count = 5, maxRetries = 3) {
+  const allAudios = await getAudioFilesFromS3(username, maxRetries);
+
+  if (allAudios.length === 0) return [];
+
+  // Fisher-Yates shuffle
+  const shuffled = [...allAudios];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+  console.log(
+    `🎲 Selected ${selected.length} random audios from ${allAudios.length} total`,
+  );
+  return selected;
 }
 
 export async function deletePlayerAudios(username) {
@@ -84,7 +112,10 @@ export async function deletePlayerAudios(username) {
     }
 
     const audioFiles = response.Contents.filter(
-      (obj) => obj.Key.endsWith(".mp3") || obj.Key.endsWith(".wav") || obj.Key.endsWith(".ogg"),
+      (obj) =>
+        obj.Key.endsWith(".mp3") ||
+        obj.Key.endsWith(".wav") ||
+        obj.Key.endsWith(".ogg"),
     );
 
     console.log(`   Found ${audioFiles.length} audio files to delete`);
@@ -185,7 +216,10 @@ export async function deleteLocalAudios(username) {
 
     console.log(`   Local delete complete for ${username}`);
   } catch (error) {
-    console.error(`   Error deleting local audios for ${username}:`, error.message);
+    console.error(
+      `   Error deleting local audios for ${username}:`,
+      error.message,
+    );
     throw error;
   }
 }
