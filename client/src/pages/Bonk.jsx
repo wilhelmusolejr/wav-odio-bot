@@ -316,16 +316,9 @@ export default function Bonk() {
                   <input
                     type="number"
                     min="1"
-                    max="10"
+                    max="100"
                     value={numAudioFiles}
-                    onChange={(e) =>
-                      setNumAudioFiles(
-                        Math.min(
-                          10,
-                          Math.max(1, parseInt(e.target.value) || 1),
-                        ),
-                      )
-                    }
+                    onChange={(e) => setNumAudioFiles(parseInt(e.target.value))}
                     className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/30"
                   />
                 </div>
@@ -360,30 +353,31 @@ export default function Bonk() {
                       const q = searchQuery.toLowerCase();
                       return (
                         account.username.toLowerCase().includes(q) ||
-                        (account.discordName && account.discordName.toLowerCase().includes(q))
+                        (account.discordName &&
+                          account.discordName.toLowerCase().includes(q))
                       );
                     })
                     .map((account) => (
-                    <label
-                      key={account.username}
-                      className="flex items-center gap-3 cursor-pointer hover:bg-white/5 p-2 rounded transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedUsers.includes(account.username)}
-                        onChange={() => handleUserToggle(account.username)}
-                        className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-0 focus:ring-offset-0"
-                      />
-                      <span className="text-sm text-white/70">
-                        {account.username}
-                        {account.discordName && (
-                          <span className="text-white/30 ml-2">
-                            ({account.discordName})
-                          </span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
+                      <label
+                        key={account.username}
+                        className="flex items-center gap-3 cursor-pointer hover:bg-white/5 p-2 rounded transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.includes(account.username)}
+                          onChange={() => handleUserToggle(account.username)}
+                          className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-0 focus:ring-offset-0"
+                        />
+                        <span className="text-sm text-white/70">
+                          {account.username}
+                          {account.discordName && (
+                            <span className="text-white/30 ml-2">
+                              ({account.discordName})
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
                 </div>
 
                 {/* Generate button */}
