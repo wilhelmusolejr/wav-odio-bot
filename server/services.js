@@ -1,6 +1,12 @@
 import path from "path";
 import { spawn } from "child_process";
-import { state, audioQueue, findGroup, findBotByGroup, getData } from "./state.js";
+import {
+  state,
+  audioQueue,
+  findGroup,
+  findBotByGroup,
+  getData,
+} from "./state.js";
 import { broadcastToGroup, broadcastToMasters, sendToBot } from "./utils.js";
 import { deletePlayerAudios, uploadNewAudios } from "./functions/audio.js";
 
@@ -37,7 +43,10 @@ export async function handlePlayerFinished(wss, playerName, groupName) {
   player.status = "done";
   console.log(`Player ${playerName} finished in group ${groupName}`);
 
-  broadcastToGroup(wss, groupName, { type: "UPDATE_PLAYERS", players: group.players });
+  broadcastToGroup(wss, groupName, {
+    type: "UPDATE_PLAYERS",
+    players: group.players,
+  });
 
   // Check if ALL players done
   if (group.players.every((p) => p.status === "done")) {
@@ -51,7 +60,10 @@ export async function handlePlayerFinished(wss, playerName, groupName) {
 async function handleGroupCompletion(wss, group) {
   // Mark all as finished
   group.players.forEach((p) => (p.status = "finished"));
-  broadcastToGroup(wss, group.name, { type: "UPDATE_PLAYERS", players: group.players });
+  broadcastToGroup(wss, group.name, {
+    type: "UPDATE_PLAYERS",
+    players: group.players,
+  });
 
   // Save players for audio processing
   const playersCopy = [...group.players];
@@ -83,7 +95,10 @@ export function removePlayerFromGroup(wss, playerName, groupName) {
     }
   }
 
-  broadcastToGroup(wss, groupName, { type: "UPDATE_PLAYERS", players: group.players });
+  broadcastToGroup(wss, groupName, {
+    type: "UPDATE_PLAYERS",
+    players: group.players,
+  });
   broadcastToMasters(wss, { type: "STATE_UPDATE", data: getData() });
 }
 
@@ -91,12 +106,19 @@ export function removePlayerFromGroup(wss, playerName, groupName) {
 // AUDIO SERVICES
 // ===========================
 
-const PYTHON_SCRIPT = path.join(process.cwd(), "..", "audio", "audio_generator_improved.py");
+const PYTHON_SCRIPT = path.join(
+  process.cwd(),
+  "..",
+  "audio",
+  "audio_generator_improved.py",
+);
 const NUM_FILES = 5;
 
 export function addToAudioQueue(players, groupName) {
   audioQueue.queue.push({ players, groupName, timestamp: new Date() });
-  console.log(`📝 Queued audio for ${groupName} (${audioQueue.queue.length} in queue)`);
+  console.log(
+    `📝 Queued audio for ${groupName} (${audioQueue.queue.length} in queue)`,
+  );
 
   if (!audioQueue.isProcessing) {
     processAudioQueue();
@@ -125,21 +147,25 @@ async function processAudioQueue() {
 }
 
 async function processAudioGeneration(players) {
-  // 1. Delete old S3 audios
-  for (const player of players) {
-    await deletePlayerAudios(player.name);
-  }
-
-  // 2. Generate new local audios
   const playerNames = players.map((p) => p.name);
-  await generateLocalAudio(playerNames, NUM_FILES);
+  console.log(`Done for: ${playerNames.join(", ")}`);
 
-  // 3. Upload to S3 (also deletes local files after upload)
-  for (const name of playerNames) {
-    await uploadNewAudios(name);
-  }
+  // TODO: Implement audio generation here
+  // // 1. Delete old S3 audios
+  // for (const player of players) {
+  //   await deletePlayerAudios(player.name);
+  // }
 
-  console.log(`Audio done for: ${playerNames.join(", ")}`);
+  // // 2. Generate new local audios
+  // const playerNames = players.map((p) => p.name);
+  // await generateLocalAudio(playerNames, NUM_FILES);
+
+  // // 3. Upload to S3 (also deletes local files after upload)
+  // for (const name of playerNames) {
+  //   await uploadNewAudios(name);
+  // }
+
+  // console.log(`Audio done for: ${playerNames.join(", ")}`);
 }
 
 async function generateLocalAudio(playerNames, numFiles) {
@@ -148,15 +174,25 @@ async function generateLocalAudio(playerNames, numFiles) {
       console.log(`\nStep 2: Generating audio for ${username}...`);
       console.log(`Running: python ${PYTHON_SCRIPT} ${username} ${numFiles}`);
 
-      const python = spawn("python", [PYTHON_SCRIPT, username, numFiles.toString()], {
-        env: { ...process.env, PYTHONIOENCODING: "utf-8" },
-      });
+      const python = spawn(
+        "python",
+        [PYTHON_SCRIPT, username, numFiles.toString()],
+        {
+          env: { ...process.env, PYTHONIOENCODING: "utf-8" },
+        },
+      );
 
-      python.stdout.on("data", (d) => console.log(`[Python]: ${d.toString().trim()}`));
-      python.stderr.on("data", (d) => console.error(`[Python]: ${d.toString().trim()}`));
+      python.stdout.on("data", (d) =>
+        console.log(`[Python]: ${d.toString().trim()}`),
+      );
+      python.stderr.on("data", (d) =>
+        console.error(`[Python]: ${d.toString().trim()}`),
+      );
 
       python.on("close", (code) => {
-        code === 0 ? resolve() : reject(new Error(`Python exited with ${code}`));
+        code === 0
+          ? resolve()
+          : reject(new Error(`Python exited with ${code}`));
       });
 
       python.on("error", reject);
