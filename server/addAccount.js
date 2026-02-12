@@ -99,15 +99,57 @@ addAccount(newAccount)
 // Multiple accounts (uncomment to use)
 const multipleAccounts = [
   {
-    username: "jonathanmclopez",
-    email: "jonathanmclopez@gmail.com",
-    password: "Qw09058222!",
-    discordName: "diebong",
-    voiceType: "ai_kael",
+    username: "dongregory0031",
+    email: "gregory_569.don@hotmail.com",
+    password: "",
+    discordName: "dongregory",
+    voiceType: "real_brendan666",
     backgroundNoise: "white_noise",
-    playerType: "initiator",
+    playerType: "respondent",
+  },
+  {
+    username: "amoramor691",
+    email: "amos.884_dominique17_dallas21@hotmail.com",
+    password: "",
+    discordName: "amoramor691",
+    voiceType: "ai_kael",
+    backgroundNoise: "fan",
+    playerType: "respondent",
+  },
+  {
+    username: "dieyoung7979",
+    email: "geordietgf6pva@hotmail.com",
+    password: "",
+    discordName: "dieyoung7979",
+    voiceType: "ai_bisaya",
+    backgroundNoise: "white_noise",
+    playerType: "respondent",
+  },
+  {
+    username: "hamillalamoves",
+    email: "hamil-2averelldurward652@hotmail.com",
+    password: "",
+    discordName: "hamillalamove",
+    voiceType: "ai_josh",
+    backgroundNoise: "fan",
+    playerType: "respondent",
+  },
+  {
+    username: "riotinbonkwmhe",
+    email: "griz.197hallsy_177.giuseppe@hotmail.com",
+    password: "",
+    discordName: "riotinbonkwmhe",
+    voiceType: "ai_bisayang_tagalog",
+    backgroundNoise: "white_noise",
+    playerType: "respondent",
   },
 ];
+
+// real_brendan666
+// ai_kael
+// ai_bisaya
+// ai_josh
+// ai_bisayang_tagalog
 
 addMultipleAccounts(multipleAccounts)
   .then(() => {
