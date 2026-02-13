@@ -91,8 +91,8 @@ app.post("/api/generate-audio", async (req, res) => {
       .json({ error: "usernames must be a non-empty array" });
   }
 
-  if (!numFiles || numFiles < 1 || numFiles > 10) {
-    return res.status(400).json({ error: "numFiles must be between 1 and 10" });
+  if (!numFiles || numFiles < 1 || numFiles > 100) {
+    return res.status(400).json({ error: "numFiles must be between 1 and 100" });
   }
 
   console.log(`\n${"=".repeat(50)}`);
@@ -114,7 +114,8 @@ app.post("/api/generate-audio", async (req, res) => {
     try {
       console.log(`\n🎵 Processing: ${username}`);
 
-      // Step 1: Delete old local audio files
+      // Step 1: Delete old local audio files before generation
+      console.log(`\n🗑️ Step 1: Deleting local audio files for ${username}...`);
       await deleteLocalAudios(username);
 
       // Step 2: Generate new audio files
@@ -146,13 +147,19 @@ app.post("/api/generate-audio", async (req, res) => {
         python.on("error", reject);
       });
 
-      // Step 3: Delete old S3 audio files
-      await deletePlayerAudios(username);
-
-      // Step 4: Upload new audio files to S3
+      // Step 3: Upload new audio files to S3
+      console.log(
+        `\n📤 Step 3: Uploading audio files to S3 for ${username}...`,
+      );
       await uploadNewAudios(username);
 
-      console.log(`✅ Completed: ${username}`);
+      // Step 4: Delete local audio files after upload (cleanup)
+      console.log(
+        `\n🗑️ Step 4: Cleaning up local audio files for ${username}...`,
+      );
+      await deleteLocalAudios(username);
+
+      console.log(`✅ Complete for: ${username}`);
     } catch (error) {
       console.error(`❌ Failed for ${username}:`, error.message);
     }
