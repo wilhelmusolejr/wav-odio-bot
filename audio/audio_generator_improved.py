@@ -111,7 +111,8 @@ def generate_round(state: Dict[str, Any], voice_type: str):
             clips_added += 1
             # Variable Pacing
             r = random.random()
-            pause = random.uniform(0.1, 0.4) if r < 0.5 else random.uniform(0.5, 1.5)
+            pause = random.uniform(3.0, 7.0)
+            # pause = random.uniform(0.1, 0.4) if r < 0.5 else random.uniform(0.5, 1.5)
             add_silence(pause, state)
             
     add_silence(random.uniform(1.0, 3.0), state)
