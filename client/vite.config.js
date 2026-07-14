@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: ["zechariah-interspinal-delayingly.ngrok-free.dev"],
-    host: "192.168.177.251",
+    host: true,
     port: 5173,
   },
 });

@@ -1,0 +1,16 @@
+{
+  "name": "wav-odio-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root runner for the wav-odio-bot server + client",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "start": "concurrently -k -n server,client -c cyan,magenta \"npm --prefix server start\" \"npm --prefix client run preview\"",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install",
+    "server": "npm --prefix server run dev",
+    "client": "npm --prefix client run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

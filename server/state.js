@@ -3,11 +3,13 @@
 // ===========================
 
 export const state = {
+  // `capacity` = how many players fill this group before it becomes "occupied"
+  // and a master is elected. Set per-group here (falls back to NO_PLAYER env).
   groups: [
-    { name: "Benk", status: "waiting", players: [], bot: null },
-    { name: "Bonk", status: "waiting", players: [], bot: null },
-    { name: "Wonk", status: "waiting", players: [], bot: null },
-    { name: "Ponk", status: "waiting", players: [], bot: null },
+    { name: "Benk", status: "waiting", players: [], bot: null, capacity: 2 },
+    { name: "Bonk", status: "waiting", players: [], bot: null, capacity: 2 },
+    { name: "Wonk", status: "waiting", players: [], bot: null, capacity: 2 },
+    { name: "Ponk", status: "waiting", players: [], bot: null, capacity: 2 },
   ],
   players: [],
   bots: [],

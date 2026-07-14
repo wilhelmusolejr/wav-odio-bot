@@ -91,7 +91,7 @@ export default function GroupCard({ data, onCountdownZero }) {
               Players
             </p>
             <p className="text-[12px] text-white/60 font-mono">
-              {data.players?.length || 0} / 5
+              {data.players?.length || 0} / {data.capacity ?? 5}
             </p>
           </div>
           <div className="min-h-32 space-y-1.5">

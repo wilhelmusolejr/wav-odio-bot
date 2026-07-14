@@ -43,12 +43,14 @@ export async function joinPlayer(wss, ws, msg, data) {
   let assignedGroupId = null;
 
   for (const group of data.groups) {
-    if (group.status === "waiting" && group.players.length < NO_PLAYER) {
+    // Per-group capacity, configurable in state.js (falls back to NO_PLAYER env)
+    const capacity = group.capacity ?? NO_PLAYER;
+    if (group.status === "waiting" && group.players.length < capacity) {
       group.players.push(player);
       assignedGroupId = group.name;
 
       // Update group status if it's now full
-      if (group.players.length === NO_PLAYER) {
+      if (group.players.length === capacity) {
         group.status = "occupied";
 
         group.players.forEach((p) => {

@@ -7,7 +7,17 @@
       "Bash(python -c:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(del \"c:\\\\Users\\\\Asus Rog Flow X16\\\\Desktop\\\\New folder\\\\nul\")"
+      "Bash(del \"c:\\\\Users\\\\Asus Rog Flow X16\\\\Desktop\\\\New folder\\\\nul\")",
+      "Bash(xargs ls -la)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(command -v aws)",
+      "Bash(aws --version)",
+      "Bash(echo \"aws CLI: installed \\($\\(aws --version 2>&1\\)\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"\\(no match / exit $?\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
